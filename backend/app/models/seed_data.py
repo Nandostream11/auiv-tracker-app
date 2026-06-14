@@ -1,0 +1,152 @@
+PROJECT_CHARTER = {
+    "name": "AUIV Simulator",
+    "mission": "20 m transect · EKF RMS ≤ 0.5 m · pytest exits 0",
+    "total_weeks": 6,
+}
+
+WEEKS_SEED = [
+    {
+        "num": 1, "title": "Infrastructure & Vehicle Model", "hours": 12,
+        "tasks": [
+            {"task_id": "1.1", "title": "ROS2 + Gazebo Harmonic dev container",
+             "detail": "Dockerfile committed to repo root",
+             "done_criteria": "docker build succeeds; ros2 topic list returns /clock inside container"},
+            {"task_id": "1.2", "title": "dave workspace built & smoke-tested",
+             "detail": "gz sim dave_worlds/pipeline.world",
+             "done_criteria": "Launches without error; pipe mesh visible in GUI"},
+            {"task_id": "1.3", "title": "BlueROV2 URDF adapted",
+             "detail": "11.5 kg mass, inertia tensor, 8-thruster geometry",
+             "done_criteria": "robot_state_publisher publishes all 12 joints; RVIZ2 renders with no TF errors"},
+            {"task_id": "1.4", "title": "Hydrodynamic plugin configured",
+             "detail": "HydrodynamicsPlugin: added mass, linear damping (Fossen 2011)",
+             "done_criteria": "Vehicle sinks to neutral buoyancy at 4 m within 5 s with zero thrust"},
+            {"task_id": "1.5", "title": "Git repo + CI pipeline",
+             "detail": "GitHub Actions, branch protection on main",
+             "done_criteria": "CI runs colcon build on push; passes green"},
+        ]
+    },
+    {
+        "num": 2, "title": "Sensor Plugin Integration", "hours": 13,
+        "tasks": [
+            {"task_id": "2.1", "title": "VN-100 IMU plugin configured",
+             "detail": "noise_density 0.007 rad/s/√Hz, accel 0.14 m/s²/√Hz",
+             "done_criteria": "Non-zero angular velocity noise at rest; bias drift visible over 60 s rosbag"},
+            {"task_id": "2.2", "title": "Keller depth sensor plugin",
+             "detail": "Gaussian noise σ = 0.003 m",
+             "done_criteria": "Reads 4.0 ± 0.006 m at static 4 m; histogram confirms normal distribution"},
+            {"task_id": "2.3", "title": "Pathfinder DVL plugin",
+             "detail": "Four-beam geometry, ±1% velocity noise",
+             "done_criteria": "0.300 ± 0.003 m/s on /auiv/dvl/velocity; beam returns plotted"},
+            {"task_id": "2.4", "title": "Oculus M750d sonar plugin",
+             "detail": "130° aperture, 5 Hz point cloud",
+             "done_criteria": "/auiv/sonar/pointcloud publishes; pipe mesh visible as arc in RVIZ2 at 2 m"},
+            {"task_id": "2.5", "title": "Sensor unit-test suite",
+             "detail": "pytest tests/test_sensor_noise.py",
+             "done_criteria": "All 4 sensors: mean error within 2σ, 1000-sample bags, all assertions pass"},
+        ]
+    },
+    {
+        "num": 3, "title": "EKF Localization", "hours": 13,
+        "tasks": [
+            {"task_id": "3.1", "title": "robot_localization ekf_node YAML",
+             "detail": "IMU prediction, DVL twist update, depth pose.z update",
+             "done_criteria": "Node launches; /auiv/odometry/filtered published at 50 Hz"},
+            {"task_id": "3.2", "title": "Static vehicle EKF test",
+             "detail": "Vehicle at origin for 120 s",
+             "done_criteria": "Position drift ≤ 0.1 m in XY; pytest assertion committed"},
+            {"task_id": "3.3", "title": "Moving vehicle EKF test",
+             "detail": "Straight 10 m run at 0.3 m/s",
+             "done_criteria": "Final position error vs ground truth ≤ 0.3 m; test_ekf_straight.py exits 0"},
+            {"task_id": "3.4", "title": "DVL dropout handling",
+             "detail": "Plugin disabled mid-run",
+             "done_criteria": "Covariance diagonal increases monotonically during dropout; test committed"},
+            {"task_id": "3.5", "title": "EKF parameter sweep",
+             "detail": "3×3 grid over Q diagonal scale factors",
+             "done_criteria": "ekf_sweep.py produces results/ekf_sweep.csv; best config set as default YAML"},
+        ]
+    },
+    {
+        "num": 4, "title": "Autonomy Tree & Mission Logic", "hours": 12,
+        "tasks": [
+            {"task_id": "4.1", "title": "BehaviorTree.CPP v4 integrated",
+             "detail": "Groot2 connection verified",
+             "done_criteria": "bt_server_node launches; Groot2 connects to localhost:1667 and renders tree"},
+            {"task_id": "4.2", "title": "ArmVehicle BT action node",
+             "detail": "Enables thruster allocation node",
+             "done_criteria": "Action returns SUCCESS; thrusters accept WrenchStamped; verified with manual publish"},
+            {"task_id": "4.3", "title": "DiveToDepth BT action node",
+             "detail": "PID depth controller, target 4 m, tolerance ±0.05 m",
+             "done_criteria": "Reaches 4.0 ± 0.05 m within 15 s; PID gains committed to YAML"},
+            {"task_id": "4.4", "title": "AlignToCorridor BT action node",
+             "detail": "Yaw controller to 090°, tolerance ±2°",
+             "done_criteria": "Rotates to 090° ± 2° within 10 s; yaw PID gains committed"},
+            {"task_id": "4.5", "title": "ExecuteTransect BT action node",
+             "detail": "Surge at 0.3 m/s, terminates at X=20 m",
+             "done_criteria": "Reaches X = 20 ± 0.2 m; full tree playable in Groot2"},
+            {"task_id": "4.6", "title": "SurfaceAndHold BT action node",
+             "detail": "Depth target 0 m, hold 10 s",
+             "done_criteria": "Surfaces to 0 ± 0.1 m, holds; full mission tree integration-tested"},
+        ]
+    },
+    {
+        "num": 5, "title": "Integration & Ground-Truth Harness", "hours": 13,
+        "tasks": [
+            {"task_id": "5.1", "title": "Full mission launch file",
+             "detail": "Single ros2 launch auiv_bringup full_mission.launch.py",
+             "done_criteria": "All nodes active, no /rosout errors, mission begins within 5 s"},
+            {"task_id": "5.2", "title": "Ground-truth pose publisher",
+             "detail": "Gazebo model state → /auiv/pose_gt at 50 Hz",
+             "done_criteria": "Published; correlated with /odometry/filtered in RVIZ2"},
+            {"task_id": "5.3", "title": "Mission recorder launch file",
+             "detail": "Bags 6 topics: pose_gt, odometry, imu, dvl, depth, bt_status",
+             "done_criteria": "Rosbag plays back without gaps; all 6 topics in ros2 bag info"},
+            {"task_id": "5.4", "title": "compute_rms_error.py analysis script",
+             "detail": "Reads rosbag, computes XY RMS error",
+             "done_criteria": "Produces results/mission_YYYYMMDD.json with rms_xy_m and mission_success"},
+            {"task_id": "5.5", "title": "Five full mission runs logged",
+             "detail": "results/ directory with 5 JSON files",
+             "done_criteria": "At least 3 of 5 show rms_xy ≤ 0.5 m and mission_success: true"},
+        ]
+    },
+    {
+        "num": 6, "title": "Final Demo, CI Validation, Docs", "hours": 12,
+        "tasks": [
+            {"task_id": "6.1", "title": "pytest test_final_demo.py in CI",
+             "detail": "Headless Gazebo run, full mission, asserts rms_xy ≤ 0.5 m",
+             "done_criteria": "Script exits 0 in GitHub Actions; green badge in README"},
+            {"task_id": "6.2", "title": "RVIZ2 config file committed",
+             "detail": "Robot model, TF, EKF pose, GT pose, sonar, DVL beams",
+             "done_criteria": "Single rviz2 -d auiv.rviz opens complete visualization"},
+            {"task_id": "6.3", "title": "Architecture diagram",
+             "detail": "docs/architecture.png: node graph, topic flow, BT structure",
+             "done_criteria": "Generated from rqt_graph + BT sketch, committed to docs/"},
+            {"task_id": "6.4", "title": "README.md complete",
+             "detail": "Setup, build, single-command demo, expected output",
+             "done_criteria": "Person with ROS2 Humble can run full demo using only README"},
+            {"task_id": "6.5", "title": "Demo video",
+             "detail": "60-90 s screen recording, Gazebo + RVIZ2 side by side",
+             "done_criteria": "docs/demo.mp4 committed or linked; GT vs EKF pose visually correlated"},
+        ]
+    },
+]
+
+RED_FLAGS = [
+    {"week": 2, "text": "All 4 sensor topics not publishing → Drop sonar, proceed with IMU + DVL + depth"},
+    {"week": 3, "text": "EKF not at 50 Hz → Replace robot_localization with hand-rolled 9-state Python EKF"},
+    {"week": 4, "text": "Fewer than 3 BT nodes green → Replace BT with flat Python state machine"},
+    {"week": 5, "text": "Run 1 RMS > 2.0 m → Fix DVL noise model first before touching EKF gains"},
+]
+
+CHECKLIST_ITEMS = [
+    {"id": "committed",         "label": "Committed at least one compiling change",               "category": "Code"},
+    {"id": "commit_ref",        "label": "Commit message references a deliverable number",         "category": "Code"},
+    {"id": "ci_passed",         "label": "CI passed (or know exactly which line fails)",           "category": "Code"},
+    {"id": "yaml_params",       "label": "Modified parameters are in YAML, not hardcoded",         "category": "Artifacts"},
+    {"id": "result_saved",      "label": "Test result (pass/fail + metric) saved in results/",     "category": "Artifacts"},
+    {"id": "comment_added",     "label": "New ROS2/Gazebo API call has a one-liner comment",       "category": "Artifacts"},
+    {"id": "blocker_named",     "label": "Can name one specific blocking issue (or 'none')",       "category": "Blocking"},
+    {"id": "next_action",       "label": "Blocker has a specific next action — file/cmd/line",    "category": "Blocking"},
+    {"id": "deliverable_known", "label": "Know which weekly deliverable I'm on",                   "category": "Milestone"},
+    {"id": "scope_check",       "label": "Done criterion is still achievable this week",           "category": "Milestone"},
+    {"id": "tomorrow_task",     "label": "Have written one concrete first task for tomorrow",      "category": "Tomorrow"},
+]

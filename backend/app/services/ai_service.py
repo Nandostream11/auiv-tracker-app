@@ -1,0 +1,272 @@
+"""
+ai_service.py — Persistent AI job queue with 5-hour retry.
+
+Flow:
+  1. Frontend calls POST /api/ai/evaluate
+  2. We attempt Claude immediately (30s timeout)
+  3. On success  → write result to daily_log + return 200
+  4. On timeout/error → create ai_jobs doc (status=pending), return 202
+  5. APScheduler runs _retry_loop() every 5 min, picks up jobs whose
+     next_retry_at <= now, attempts Claude again
+  6. On retry success → write result to daily_log, mark job completed
+  7. Frontend polls GET /api/ai/jobs/{device_id}?status=completed&since=<iso>
+     and hydrates the store
+"""
+
+import json
+import logging
+from datetime import datetime, timezone, timedelta
+from typing import Any, Dict, Optional
+
+import httpx
+from bson import ObjectId
+
+from app.db import jobs_col, logs_col
+from app.models.seed_data import CHECKLIST_ITEMS
+
+logger = logging.getLogger("ai_service")
+
+ANTHROPIC_URL  = "https://api.anthropic.com/v1/messages"
+MODEL          = "claude-sonnet-4-20250514"
+TIMEOUT_S      = 28          # slightly under 30 so we catch it cleanly
+RETRY_HOURS    = 5
+MAX_RETRIES    = 5
+
+
+# ── Prompt builders ───────────────────────────────────────────────────────
+
+def _build_evaluate_prompt(payload: Dict[str, Any]) -> str:
+    check_labels = {item["id"]: item["label"] for item in CHECKLIST_ITEMS}
+    check_summary = "\n".join(
+        f"{'✓' if payload['checks'].get(cid) else '✗'} {label}"
+        for cid, label in check_labels.items()
+    )
+    return f"""You are a senior robotics engineering lead reviewing a daily standup for the AUIV Simulator project.
+
+TASK: {payload['task_title']}
+DONE CRITERIA: {payload['done_criteria']}
+PREVIOUS NOTES: {payload.get('previous_notes') or 'None'}
+
+ENGINEER CHECKLIST:
+{check_summary}
+
+BLOCKING ISSUE: {payload.get('blocker') or 'None stated'}
+NEXT ACTION: {payload.get('next_action') or 'None stated'}
+TOMORROW FIRST TASK: {payload.get('tomorrow_task') or 'None stated'}
+
+Respond ONLY with valid JSON, no markdown, no backticks:
+{{"completion_pct":<0-100 int>,"momentum":"strong"|"ok"|"at_risk","remaining":["<2-4 short strings>"],"blocker_assessment":"clear"|"vague"|"none","top_concern":"<one sentence>","green_signals":["<1-3 things going well>"]}}"""
+
+
+def _build_subtask_prompt(payload: Dict[str, Any]) -> str:
+    return f"""You are a senior robotics engineering lead breaking down a sprint task for the AUIV Simulator project.
+
+TASK ID: {payload['task_id']}
+TASK TITLE: {payload['task_title']}
+DONE CRITERIA: {payload['done_criteria']}
+CURRENT NOTES: {payload.get('current_notes') or 'None'}
+
+Generate exactly 4-6 concrete, actionable sub-steps. Each starts with an imperative verb and references a specific file, command, or parameter.
+
+Respond ONLY with valid JSON, no markdown, no backticks:
+{{"subtasks":["<step 1>","<step 2>","<step 3>","<step 4>"]}}"""
+
+
+def _build_prompt(job_type: str, payload: Dict[str, Any]) -> str:
+    if job_type == "evaluate":
+        return _build_evaluate_prompt(payload)
+    return _build_subtask_prompt(payload)
+
+
+# ── Raw Claude call ───────────────────────────────────────────────────────
+
+async def _call_claude(api_key: str, prompt: str, max_tokens: int = 800) -> Dict[str, Any]:
+    """Call Claude. Returns parsed dict on success. Raises on any failure."""
+    headers = {
+        "Content-Type": "application/json",
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+    }
+    body = {
+        "model": MODEL,
+        "max_tokens": max_tokens,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    async with httpx.AsyncClient(timeout=TIMEOUT_S) as client:
+        resp = await client.post(ANTHROPIC_URL, headers=headers, json=body)
+
+    if resp.status_code != 200:
+        err = resp.json()
+        raise RuntimeError(
+            err.get("error", {}).get("message", f"HTTP {resp.status_code}")
+        )
+
+    data = resp.json()
+    raw = "".join(b.get("text", "") for b in data.get("content", []))
+    clean = raw.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+    return json.loads(clean)
+
+
+# ── Job persistence ───────────────────────────────────────────────────────
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+def _next_retry_iso() -> str:
+    return (datetime.now(timezone.utc) + timedelta(hours=RETRY_HOURS)).isoformat()
+
+
+async def create_job(
+    device_id: str,
+    log_id: str,
+    job_type: str,
+    api_key: str,
+    payload: Dict[str, Any],
+) -> str:
+    """Persist a pending job. Returns the job _id as str."""
+    now = _now_iso()
+    doc = {
+        "device_id":          device_id,
+        "log_id":             log_id,
+        "job_type":           job_type,
+        "status":             "pending",
+        "api_key":            api_key,
+        "payload":            payload,
+        "result":             None,
+        "error":              None,
+        "retry_count":        0,
+        "next_retry_at":      _next_retry_iso(),
+        "created_at":         now,
+        "updated_at":         now,
+    }
+    result = await jobs_col().insert_one(doc)
+    return str(result.inserted_id)
+
+
+async def _mark_completed(job_id: ObjectId, result: Dict[str, Any]):
+    now = _now_iso()
+    await jobs_col().update_one(
+        {"_id": job_id},
+        {"$set": {
+            "status":     "completed",
+            "result":     result,
+            "error":      None,
+            "updated_at": now,
+        }}
+    )
+
+
+async def _mark_failed(job_id: ObjectId, error: str, exhausted: bool):
+    now = _now_iso()
+    await jobs_col().update_one(
+        {"_id": job_id},
+        {"$set": {
+            "status":         "failed" if exhausted else "pending",
+            "error":          error,
+            "next_retry_at":  None if exhausted else _next_retry_iso(),
+            "updated_at":     now,
+        },
+        "$inc": {"retry_count": 1}}
+    )
+
+
+async def _write_eval_to_log(log_id: str, result: Dict[str, Any]):
+    """Patch the daily_log document with the completed AI eval."""
+    try:
+        await logs_col().update_one(
+            {"_id": ObjectId(log_id)},
+            {"$set": {"ai_eval": result, "updated_at": _now_iso()}}
+        )
+    except Exception as e:
+        logger.warning(f"Could not patch log {log_id}: {e}")
+
+
+# ── Attempt (used both on first call and on retry) ────────────────────────
+
+async def attempt_evaluation(
+    device_id: str,
+    log_id: str,
+    api_key: str,
+    payload: Dict[str, Any],
+    job_type: str = "evaluate",
+) -> Dict[str, Any]:
+    """
+    Try Claude immediately.
+    - Success → returns result dict, also patches log if log_id given
+    - Timeout/error → creates a pending job, raises AIJobQueued
+    """
+    prompt = _build_prompt(job_type, payload)
+    max_tokens = 800 if job_type == "evaluate" else 600
+
+    try:
+        result = await _call_claude(api_key, prompt, max_tokens)
+        if log_id:
+            await _write_eval_to_log(log_id, result)
+        return result
+
+    except (httpx.TimeoutException, httpx.ReadTimeout, httpx.ConnectTimeout) as e:
+        logger.warning(f"Claude timeout for device={device_id} log={log_id}: {e}")
+        job_id = await create_job(device_id, log_id, job_type, api_key, payload)
+        raise AIJobQueued(job_id=job_id, reason="timeout")
+
+    except Exception as e:
+        logger.error(f"Claude error for device={device_id}: {e}")
+        job_id = await create_job(device_id, log_id, job_type, api_key, payload)
+        raise AIJobQueued(job_id=job_id, reason=str(e))
+
+
+class AIJobQueued(Exception):
+    """Raised when Claude call fails and job has been queued for retry."""
+    def __init__(self, job_id: str, reason: str):
+        self.job_id = job_id
+        self.reason = reason
+        super().__init__(f"Job queued [{job_id}]: {reason}")
+
+
+# ── Retry loop (called by APScheduler every 5 min) ────────────────────────
+
+async def run_pending_retries():
+    """
+    Called by APScheduler. Picks up all pending jobs whose
+    next_retry_at <= now and attempts Claude again.
+    """
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+
+    cursor = jobs_col().find({
+        "status": "pending",
+        "next_retry_at": {"$lte": now_iso},
+    })
+
+    async for job in cursor:
+        job_id   = job["_id"]
+        log_id   = job.get("log_id", "")
+        job_type = job.get("job_type", "evaluate")
+        api_key  = job.get("api_key", "")
+        payload  = job.get("payload", {})
+        retries  = job.get("retry_count", 0)
+
+        logger.info(f"Retrying job {job_id} (attempt {retries + 1})")
+
+        # Mark running
+        await jobs_col().update_one(
+            {"_id": job_id},
+            {"$set": {"status": "running", "updated_at": now_iso}}
+        )
+
+        prompt     = _build_prompt(job_type, payload)
+        max_tokens = 800 if job_type == "evaluate" else 600
+
+        try:
+            result = await _call_claude(api_key, prompt, max_tokens)
+            await _write_eval_to_log(log_id, result)
+            await _mark_completed(job_id, result)
+            logger.info(f"Job {job_id} completed on retry {retries + 1}")
+
+        except Exception as e:
+            exhausted = (retries + 1) >= MAX_RETRIES
+            await _mark_failed(job_id, str(e), exhausted)
+            if exhausted:
+                logger.error(f"Job {job_id} exhausted after {MAX_RETRIES} retries: {e}")
+            else:
+                logger.warning(f"Job {job_id} retry {retries + 1} failed, will retry in {RETRY_HOURS}h: {e}")
