@@ -22,7 +22,7 @@ jobs:
             -H "Accept: application/json" | \
             python3 -c "import sys,json; data=json.load(sys.stdin); print(data[0]['owner']['id'])")
           echo "owner_id=$OWNER_ID" >> $GITHUB_OUTPUT
-          echo "Owner ID: $OWNER_ID"
+          echo "Owner: $OWNER_ID"
 
       - name: Check if service exists
         id: check_service
@@ -40,10 +40,20 @@ jobs:
               print(item['service']['id'])
               break
           " 2>/dev/null || echo "")
-          echo "service_id=$SERVICE_ID" >> $GITHUB_OUTPUT
-          echo "Existing service ID: '$SERVICE_ID'"
+          SERVICE_URL=$(echo "$SERVICES" | python3 -c "
+          import sys,json
+          data=json.load(sys.stdin)
+          for item in data:
+            if item.get('service',{}).get('name') == 'auiv-tracker-api':
+              print(item['service'].get('serviceDetails',{}).get('url',''))
+              break
+          " 2>/dev/null || echo "")
+          echo "service_id=$SERVICE_ID"   >> $GITHUB_OUTPUT
+          echo "service_url=$SERVICE_URL" >> $GITHUB_OUTPUT
+          echo "Service ID:  $SERVICE_ID"
+          echo "Service URL: $SERVICE_URL"
 
-      - name: Create Render service
+      - name: Create Render service (first time only)
         id: create_service
         if: steps.check_service.outputs.service_id == ''
         env:
@@ -72,17 +82,16 @@ jobs:
               \"branch\": \"main\",
               \"autoDeploy\": \"yes\",
               \"envVars\": [
-                {\"key\": \"MONGO_URL\",       \"value\": \"$MONGO_URL\"},
-                {\"key\": \"DB_NAME\",         \"value\": \"auiv_tracker\"},
-                {\"key\": \"PYTHON_VERSION\",  \"value\": \"3.12.0\"}
+                {\"key\": \"MONGO_URL\",      \"value\": \"$MONGO_URL\"},
+                {\"key\": \"DB_NAME\",        \"value\": \"auiv_tracker\"},
+                {\"key\": \"PYTHON_VERSION\", \"value\": \"3.12.0\"}
               ]
             }")
-          echo "Response: $RESPONSE"
           SERVICE_ID=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('service',{}).get('id',''))" 2>/dev/null || echo "")
           echo "service_id=$SERVICE_ID" >> $GITHUB_OUTPUT
-          echo "Created service: $SERVICE_ID"
+          echo "Created: $SERVICE_ID"
 
-      - name: Trigger redeploy on existing service
+      - name: Trigger redeploy (existing service)
         if: steps.check_service.outputs.service_id != ''
         env:
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
@@ -92,58 +101,83 @@ jobs:
             -H "Authorization: Bearer $RENDER_API_KEY" \
             -H "Content-Type: application/json" \
             -d '{"clearCache":"do_not_clear"}'
-          echo "Redeploy triggered for $SERVICE_ID"
+          echo "Redeploy triggered"
 
-      - name: Wait for service to be live
+      - name: Wait and verify health
         env:
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
         run: |
           SERVICE_ID="${{ steps.check_service.outputs.service_id }}"
-          if [ -z "$SERVICE_ID" ]; then
-            SERVICE_ID="${{ steps.create_service.outputs.service_id }}"
-          fi
-          echo "Polling service: $SERVICE_ID"
-          for i in $(seq 1 30); do
+          [ -z "$SERVICE_ID" ] && SERVICE_ID="${{ steps.create_service.outputs.service_id }}"
+
+          echo "Waiting for deploy... (polls every 20s)"
+          BACKEND_URL=""
+          for i in $(seq 1 25); do
             sleep 20
             INFO=$(curl -s "https://api.render.com/v1/services/$SERVICE_ID" \
-              -H "Authorization: Bearer $RENDER_API_KEY" \
-              -H "Accept: application/json")
-            URL=$(echo "$INFO"   | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('service',{}).get('serviceDetails',{}).get('url',''))" 2>/dev/null || echo "")
-            STATE=$(echo "$INFO" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('service',{}).get('suspended','unknown'))" 2>/dev/null || echo "unknown")
-            echo "[$i/30] url=$URL state=$STATE"
-            if [ -n "$URL" ]; then
-              HEALTH=$(curl -s "https://$URL/health" || echo "unreachable")
+              -H "Authorization: Bearer $RENDER_API_KEY" -H "Accept: application/json")
+            URL=$(echo "$INFO" | python3 -c "
+          import sys,json
+          d=json.load(sys.stdin)
+          print(d.get('service',{}).get('serviceDetails',{}).get('url',''))
+          " 2>/dev/null || echo "")
+            [ -n "$URL" ] && BACKEND_URL="https://$URL"
+            echo "[$i/25] $BACKEND_URL"
+            if [ -n "$BACKEND_URL" ]; then
+              HEALTH=$(curl -sf "$BACKEND_URL/health" 2>/dev/null || echo "starting")
               echo "Health: $HEALTH"
               if echo "$HEALTH" | grep -q '"ok"'; then
-                echo ""
-                echo "================================================"
-                echo "DEPLOY COMPLETE"
-                echo "Backend URL: https://$URL"
-                echo "Health endpoint: https://$URL/health"
-                echo "API docs:        https://$URL/docs"
-                echo "================================================"
-                exit 0
+                echo "BACKEND_URL=$BACKEND_URL" >> $GITHUB_ENV
+                break
               fi
             fi
           done
-          echo "Deploy did not finish in time — check Render dashboard"
-          exit 1
 
-      - name: Output final URL
+      - name: Write deploy summary
         if: always()
         env:
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
         run: |
-          SERVICES=$(curl -s "https://api.render.com/v1/services?limit=20" \
-            -H "Authorization: Bearer $RENDER_API_KEY" \
-            -H "Accept: application/json")
-          echo "$SERVICES" | python3 -c "
+          SERVICE_ID="${{ steps.check_service.outputs.service_id }}"
+          [ -z "$SERVICE_ID" ] && SERVICE_ID="${{ steps.create_service.outputs.service_id }}"
+
+          INFO=$(curl -s "https://api.render.com/v1/services/$SERVICE_ID" \
+            -H "Authorization: Bearer $RENDER_API_KEY" -H "Accept: application/json")
+          URL=$(echo "$INFO" | python3 -c "
           import sys,json
-          data=json.load(sys.stdin)
-          for item in data:
-            svc=item.get('service',{})
-            if svc.get('name')=='auiv-tracker-api':
-              url=svc.get('serviceDetails',{}).get('url','')
-              print(f'Service: auiv-tracker-api')
-              print(f'URL: https://{url}')
-          " 2>/dev/null || echo "Could not fetch URL"
+          d=json.load(sys.stdin)
+          print(d.get('service',{}).get('serviceDetails',{}).get('url',''))
+          " 2>/dev/null || echo "")
+          DEPLOYS=$(curl -s "https://api.render.com/v1/services/$SERVICE_ID/deploys?limit=1" \
+            -H "Authorization: Bearer $RENDER_API_KEY" -H "Accept: application/json")
+          DEPLOY_STATUS=$(echo "$DEPLOYS" | python3 -c "
+          import sys,json
+          d=json.load(sys.stdin)
+          if d: print(d[0].get('deploy',{}).get('status','unknown'))
+          " 2>/dev/null || echo "unknown")
+
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          ## AUIV Tracker Backend Deploy
+
+          | Field | Value |
+          |---|---|
+          | Service | auiv-tracker-api |
+          | Backend URL | https://${URL} |
+          | Health | https://${URL}/health |
+          | API Docs | https://${URL}/docs |
+          | Deploy Status | ${DEPLOY_STATUS} |
+          | Service ID | ${SERVICE_ID} |
+
+          ### Next step — set this in the app:
+          \`\`\`
+          https://${URL}
+          \`\`\`
+          EOF
+
+          echo "================================================"
+          echo "SERVICE ID:   $SERVICE_ID"
+          echo "BACKEND URL:  https://$URL"
+          echo "HEALTH CHECK: https://$URL/health"
+          echo "API DOCS:     https://$URL/docs"
+          echo "DEPLOY STATUS: $DEPLOY_STATUS"
+          echo "================================================"
