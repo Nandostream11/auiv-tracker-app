@@ -1,0 +1,6 @@
+BACKEND_URL=https://
+HEALTH_URL=https:///health
+DOCS_URL=https:///docs
+DEPLOY_STATUS=live
+SERVICE_ID=srv-d8o382c8aovs73feervg
+Last updated: 2026-06-17T18:45:16Z
