@@ -202,3 +202,22 @@ jobs:
           name: backend-url
           path: deploy_output/backend_url.txt
           retention-days: 7
+
+      - name: Publish URL via commit status (no redirect, pure REST)
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BACKEND_URL=$(grep BACKEND_URL deploy_output/backend_url.txt | cut -d= -f2)
+          SHA="${{ github.sha }}"
+          curl -s -X POST \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/$SHA" \
+            -H "Authorization: token $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -d "{
+              \"state\": \"success\",
+              \"target_url\": \"${BACKEND_URL}\",
+              \"description\": \"Backend live at ${BACKEND_URL}\",
+              \"context\": \"render-deploy/backend-url\"
+            }"
+          echo "Commit status published with URL: $BACKEND_URL"
