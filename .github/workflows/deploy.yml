@@ -181,3 +181,24 @@ jobs:
           echo "API DOCS:     https://$URL/docs"
           echo "DEPLOY STATUS: $DEPLOY_STATUS"
           echo "================================================"
+
+          # Write to a plain file so it can be uploaded as an artifact
+          # (artifact downloads go through api.github.com, which is reachable
+          #  even when the raw job-log redirect target is not)
+          mkdir -p deploy_output
+          cat > deploy_output/backend_url.txt << EOF2
+          BACKEND_URL=https://${URL}
+          HEALTH_URL=https://${URL}/health
+          DOCS_URL=https://${URL}/docs
+          DEPLOY_STATUS=${DEPLOY_STATUS}
+          SERVICE_ID=${SERVICE_ID}
+          EOF2
+          cat deploy_output/backend_url.txt
+
+      - name: Upload deploy info as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-url
+          path: deploy_output/backend_url.txt
+          retention-days: 7
