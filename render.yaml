@@ -8,7 +8,7 @@ services:
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: MONGO_URL
-        value: mongodb+srv://REDACTED_DB_USER:REDACTED_PASSWORD@REDACTED_CLUSTER_HOST/?appName=auiv-cluster
+        sync: false
       - key: DB_NAME
         value: auiv_tracker
       - key: PYTHON_VERSION
