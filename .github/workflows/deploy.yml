@@ -8,6 +8,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -203,21 +204,20 @@ jobs:
           path: deploy_output/backend_url.txt
           retention-days: 7
 
-      - name: Publish URL via commit status (no redirect, pure REST)
+      - name: Commit URL to repo file (readable via plain content API)
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          BACKEND_URL=$(grep BACKEND_URL deploy_output/backend_url.txt | cut -d= -f2)
-          SHA="${{ github.sha }}"
-          curl -s -X POST \
-            "https://api.github.com/repos/${{ github.repository }}/statuses/$SHA" \
-            -H "Authorization: token $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            -d "{
-              \"state\": \"success\",
-              \"target_url\": \"${BACKEND_URL}\",
-              \"description\": \"Backend live at ${BACKEND_URL}\",
-              \"context\": \"render-deploy/backend-url\"
-            }"
-          echo "Commit status published with URL: $BACKEND_URL"
+          git config --global user.email "actions@github.com"
+          git config --global user.name "github-actions"
+
+          mkdir -p .deploy
+          cp deploy_output/backend_url.txt .deploy/backend_url.txt
+          echo "Last updated: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> .deploy/backend_url.txt
+
+          git add .deploy/backend_url.txt
+          git diff --staged --quiet && echo "No changes" && exit 0
+
+          git commit -m "deploy: record live backend URL [skip ci]"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" HEAD:main
