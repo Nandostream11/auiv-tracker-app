@@ -2,10 +2,10 @@ import React from 'react';
 import { ScrollView, View, Text, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useStore, getWeekProgress, calcStreak, todayKey } from '../../lib/store';
+import { useStore, getWeekProgress, calcStreak, calcBestStreak, todayKey } from '../../lib/store';
 import {
   BrutalBox, MetricBlock, BrutalBar, SectionLabel,
-  Mono, TagPill, Divider,
+  Mono, TagPill, Divider, StreakCalendar,
 } from '../../components/ui';
 import { C, S, FONT } from '../../constants/theme';
 
@@ -35,6 +35,8 @@ export default function OverviewScreen() {
   const blocked = tasks.filter((t) => t.status === 'blocked').length;
   const overallPct = total ? Math.round((done / total) * 100) : 0;
   const streak = calcStreak(logs);
+  const bestStreak = calcBestStreak(logs);
+  const loggedDates = new Set(logs.map((l) => l.date));
   const todayDone = logs.some((l) => l.date === todayKey());
   const recentLogs = [...logs].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 4);
 
@@ -67,9 +69,40 @@ export default function OverviewScreen() {
           </View>
         </View>
 
-        {/* Metrics row */}
+        {/* Streak card with calendar */}
+        <View style={{
+          borderWidth: C.BORDER_W, borderColor: streak >= 3 ? C.amber : C.border,
+          backgroundColor: C.surface, padding: S.md, marginBottom: S.sm,
+        }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: S.md }}>
+            <View>
+              <Text style={{ fontFamily: FONT.mono, fontSize: 9, color: C.textDim, letterSpacing: 2, textTransform: 'uppercase', marginBottom: 2 }}>
+                CURRENT STREAK
+              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6 }}>
+                <Text style={{ fontFamily: FONT.mono, fontSize: 40, fontWeight: '900', color: streak >= 3 ? C.amber : C.orange, lineHeight: 42 }}>
+                  {streak}
+                </Text>
+                <Text style={{ fontFamily: FONT.mono, fontSize: 13, color: C.textDim }}>
+                  {streak === 1 ? 'DAY' : 'DAYS'}
+                </Text>
+              </View>
+            </View>
+            <View style={{ alignItems: 'flex-end' }}>
+              <Text style={{ fontFamily: FONT.mono, fontSize: 9, color: C.textDim, letterSpacing: 2, textTransform: 'uppercase', marginBottom: 2 }}>
+                BEST
+              </Text>
+              <Text style={{ fontFamily: FONT.mono, fontSize: 20, fontWeight: '700', color: C.textSecondary }}>
+                {bestStreak}
+              </Text>
+            </View>
+          </View>
+
+          <StreakCalendar loggedDates={loggedDates} />
+        </View>
+
+        {/* Task metrics row */}
         <View style={{ flexDirection: 'row', gap: 0, marginBottom: S.sm }}>
-          <MetricBlock value={streak} label="STREAK" color={streak >= 3 ? C.amber : C.orange} />
           <MetricBlock value={done}   label="DONE"   color={C.green} />
           <MetricBlock value={inProg} label="ACTIVE" color={C.orange} />
           <MetricBlock value={blocked} label="BLOCKED" color={blocked > 0 ? C.red : C.textDim} />

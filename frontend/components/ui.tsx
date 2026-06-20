@@ -287,3 +287,77 @@ export function EmptyState({ label }: { label: string }) {
     </View>
   );
 }
+
+// ── StreakCalendar ────────────────────────────────────────────────────────
+// GitHub-style activity grid: last 35 days (5 weeks x 7 days), most recent
+// week on the right. Filled orange = standup logged. Outlined = today.
+// Empty = missed day. Tapping a day with a log could later deep-link to it.
+export function StreakCalendar({ loggedDates }: { loggedDates: Set<string> }) {
+  const DAYS = 35;
+  const today = new Date();
+  const todayStr = today.toISOString().slice(0, 10);
+
+  // Build array of the last 35 days, oldest first
+  const cells: { date: string; logged: boolean; isToday: boolean; isFuture: boolean }[] = [];
+  for (let i = DAYS - 1; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    const dateStr = d.toISOString().slice(0, 10);
+    cells.push({
+      date: dateStr,
+      logged: loggedDates.has(dateStr),
+      isToday: dateStr === todayStr,
+      isFuture: false,
+    });
+  }
+
+  // Group into 5 columns of 7 (weeks), rendered as rows of 7 for simplicity
+  // on narrow phone screens (rows = weeks, reads top-to-bottom oldest-to-newest)
+  const weeks: typeof cells[] = [];
+  for (let i = 0; i < cells.length; i += 7) {
+    weeks.push(cells.slice(i, i + 7));
+  }
+
+  const dayLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+  const cellSize = 16;
+  const gap = 4;
+
+  return (
+    <View>
+      {/* Day-of-week header */}
+      <View style={{ flexDirection: 'row', marginBottom: 6, paddingLeft: 0 }}>
+        {dayLabels.map((d, i) => (
+          <View key={i} style={{ width: cellSize, marginRight: gap, alignItems: 'center' }}>
+            <Text style={{ fontFamily: FONT.mono, fontSize: 8, color: C.textDim }}>{d}</Text>
+          </View>
+        ))}
+      </View>
+
+      {weeks.map((week, wi) => (
+        <View key={wi} style={{ flexDirection: 'row', marginBottom: gap }}>
+          {week.map((cell) => (
+            <View
+              key={cell.date}
+              style={{
+                width: cellSize, height: cellSize, marginRight: gap,
+                backgroundColor: cell.logged ? C.orange : C.surfaceHigh,
+                borderWidth: cell.isToday ? 1.5 : 1,
+                borderColor: cell.isToday ? C.white : (cell.logged ? C.orange : C.border),
+              }}
+            />
+          ))}
+        </View>
+      ))}
+
+      {/* Legend */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: S.xs, marginTop: S.sm }}>
+        <View style={{ width: 10, height: 10, backgroundColor: C.orange }} />
+        <Text style={{ fontFamily: FONT.mono, fontSize: 9, color: C.textDim, marginRight: S.sm }}>LOGGED</Text>
+        <View style={{ width: 10, height: 10, backgroundColor: C.surfaceHigh, borderWidth: 1, borderColor: C.border }} />
+        <Text style={{ fontFamily: FONT.mono, fontSize: 9, color: C.textDim, marginRight: S.sm }}>MISSED</Text>
+        <View style={{ width: 10, height: 10, backgroundColor: C.surfaceHigh, borderWidth: 1.5, borderColor: C.white }} />
+        <Text style={{ fontFamily: FONT.mono, fontSize: 9, color: C.textDim }}>TODAY</Text>
+      </View>
+    </View>
+  );
+}

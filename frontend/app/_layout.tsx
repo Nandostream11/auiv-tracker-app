@@ -7,6 +7,7 @@ import { getDeviceId, initProject, getAllTasks, getAllLogs } from '../lib/api';
 import { useStore } from '../lib/store';
 import { useJobStore } from '../lib/jobStore';
 import { useAIJobPoller } from '../hooks/useAIJobPoller';
+import { useDailyReminder } from '../hooks/useDailyReminder';
 import { C, FONT, S } from '../constants/theme';
 
 function EvalToast({ date, visible }: { date: string; visible: boolean }) {
@@ -74,6 +75,7 @@ function AppBootstrap({ children }: { children: React.ReactNode }) {
   }, []);
 
   useAIJobPoller(handleEvalComplete);
+  useDailyReminder();
 
   return (
     <View style={{ flex: 1 }}>

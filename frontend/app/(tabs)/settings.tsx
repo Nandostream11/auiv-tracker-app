@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { ScrollView, View, Text, TouchableOpacity, Alert, Linking } from 'react-native';
+import { ScrollView, View, Text, TouchableOpacity, Alert, Linking, Switch } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { BrutalBox, BrutalBtn, BrutalInput, SectionLabel, Mono, TagPill } from '../../components/ui';
 import { C, S, FONT } from '../../constants/theme';
 import { getApiKey, setApiKey, getBaseUrl, setBaseUrl, getDeviceId } from '../../lib/api';
 import { useStore } from '../../lib/store';
+import { getReminderSettings, setReminderSettings } from '../../hooks/useDailyReminder';
 
 export default function SettingsScreen() {
   const { deviceId } = useStore();
@@ -16,10 +17,49 @@ export default function SettingsScreen() {
   const [testMessage, setTestMessage]= useState('');
   const [saving, setSaving]          = useState(false);
 
+  const [reminderHour,   setReminderHour]   = useState(19);
+  const [reminderMinute, setReminderMinute] = useState(0);
+  const [reminderEnabled,setReminderEnabled]= useState(true);
+  const [reminderSaving, setReminderSaving] = useState(false);
+
   useEffect(() => {
     getApiKey().then(setApiKeyState);
     getBaseUrl().then(setBackendUrlState);
+    getReminderSettings().then(({ hour, minute, enabled }) => {
+      setReminderHour(hour);
+      setReminderMinute(minute);
+      setReminderEnabled(enabled);
+    });
   }, []);
+
+  async function handleReminderChange(hour: number, minute: number, enabled: boolean) {
+    setReminderHour(hour);
+    setReminderMinute(minute);
+    setReminderEnabled(enabled);
+    setReminderSaving(true);
+    try {
+      await setReminderSettings(hour, minute, enabled);
+    } catch (e: any) {
+      Alert.alert('ERROR', `Could not schedule reminder: ${e.message}`);
+    }
+    setReminderSaving(false);
+  }
+
+  function adjustHour(delta: number) {
+    const next = (reminderHour + delta + 24) % 24;
+    handleReminderChange(next, reminderMinute, reminderEnabled);
+  }
+
+  function adjustMinute(delta: number) {
+    const next = (reminderMinute + delta + 60) % 60;
+    handleReminderChange(reminderHour, next, reminderEnabled);
+  }
+
+  function formatTime(h: number, m: number) {
+    const period = h >= 12 ? 'PM' : 'AM';
+    const h12 = h % 12 === 0 ? 12 : h % 12;
+    return `${h12}:${String(m).padStart(2, '0')} ${period}`;
+  }
 
   async function testApiKey() {
     if (!apiKey.trim()) return;
@@ -114,6 +154,88 @@ export default function SettingsScreen() {
               </Text>
             </TouchableOpacity>
           </View>
+        </BrutalBox>
+
+        {/* Daily Reminder */}
+        <BrutalBox style={{ padding: S.md }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: S.sm }}>
+            <SectionLabel color={C.orange}>DAILY REMINDER</SectionLabel>
+            <Switch
+              value={reminderEnabled}
+              onValueChange={(v) => handleReminderChange(reminderHour, reminderMinute, v)}
+              trackColor={{ false: C.border, true: C.orangeGhost }}
+              thumbColor={reminderEnabled ? C.orange : C.textDim}
+            />
+          </View>
+
+          <Text style={{ fontFamily: FONT.mono, fontSize: 11, color: C.textSecondary, marginBottom: S.md, lineHeight: 18 }}>
+            A local notification fires every day at this time if you haven't logged today's standup yet.
+          </Text>
+
+          <View style={{
+            flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: S.md,
+            opacity: reminderEnabled ? 1 : 0.4,
+          }}>
+            {/* Hour stepper */}
+            <View style={{ alignItems: 'center' }}>
+              <TouchableOpacity
+                disabled={!reminderEnabled}
+                onPress={() => adjustHour(1)}
+                style={{ padding: S.sm, minWidth: 44, alignItems: 'center' }}>
+                <Text style={{ color: C.orange, fontSize: 18, fontWeight: '900' }}>▲</Text>
+              </TouchableOpacity>
+              <Text style={{ fontFamily: FONT.mono, fontSize: 28, fontWeight: '900', color: C.white, minWidth: 56, textAlign: 'center' }}>
+                {String(reminderHour % 12 === 0 ? 12 : reminderHour % 12).padStart(2, '0')}
+              </Text>
+              <TouchableOpacity
+                disabled={!reminderEnabled}
+                onPress={() => adjustHour(-1)}
+                style={{ padding: S.sm, minWidth: 44, alignItems: 'center' }}>
+                <Text style={{ color: C.orange, fontSize: 18, fontWeight: '900' }}>▼</Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={{ fontFamily: FONT.mono, fontSize: 28, fontWeight: '900', color: C.textDim }}>:</Text>
+
+            {/* Minute stepper */}
+            <View style={{ alignItems: 'center' }}>
+              <TouchableOpacity
+                disabled={!reminderEnabled}
+                onPress={() => adjustMinute(5)}
+                style={{ padding: S.sm, minWidth: 44, alignItems: 'center' }}>
+                <Text style={{ color: C.orange, fontSize: 18, fontWeight: '900' }}>▲</Text>
+              </TouchableOpacity>
+              <Text style={{ fontFamily: FONT.mono, fontSize: 28, fontWeight: '900', color: C.white, minWidth: 56, textAlign: 'center' }}>
+                {String(reminderMinute).padStart(2, '0')}
+              </Text>
+              <TouchableOpacity
+                disabled={!reminderEnabled}
+                onPress={() => adjustMinute(-5)}
+                style={{ padding: S.sm, minWidth: 44, alignItems: 'center' }}>
+                <Text style={{ color: C.orange, fontSize: 18, fontWeight: '900' }}>▼</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* AM/PM toggle */}
+            <TouchableOpacity
+              disabled={!reminderEnabled}
+              onPress={() => adjustHour(12)}
+              style={{
+                borderWidth: C.BORDER_W, borderColor: C.orange,
+                paddingHorizontal: S.md, paddingVertical: S.sm,
+                marginLeft: S.sm,
+              }}>
+              <Text style={{ fontFamily: FONT.mono, fontSize: 13, fontWeight: '900', color: C.orange }}>
+                {reminderHour >= 12 ? 'PM' : 'AM'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {reminderEnabled && (
+            <Text style={{ fontFamily: FONT.mono, fontSize: 10, color: C.textDim, textAlign: 'center', marginTop: S.sm }}>
+              {reminderSaving ? 'SAVING...' : `Reminder set for ${formatTime(reminderHour, reminderMinute)} daily`}
+            </Text>
+          )}
         </BrutalBox>
 
         {/* Backend URL */}

@@ -121,6 +121,19 @@ export function calcStreak(logs: DailyLog[]): number {
   return streak;
 }
 
+export function calcBestStreak(logs: DailyLog[]): number {
+  const dates = [...new Set(logs.map((l) => l.date))].sort();
+  if (!dates.length) return 0;
+  const msPerDay = 86400000;
+  let best = 1, current = 1;
+  for (let i = 1; i < dates.length; i++) {
+    const diff = Math.round((new Date(dates[i]).getTime() - new Date(dates[i - 1]).getTime()) / msPerDay);
+    if (diff === 1) { current++; best = Math.max(best, current); }
+    else { current = 1; }
+  }
+  return best;
+}
+
 export function statusColor(status: TaskStatus, C: any) {
   return status === 'done' ? C.green : status === 'inprogress' ? C.orange : status === 'blocked' ? C.red : C.textDim;
 }
