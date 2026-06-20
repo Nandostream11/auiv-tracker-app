@@ -19,9 +19,9 @@
 
 import { useEffect, useRef, useCallback } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
-import { useStore } from './store';
-import { useJobStore, AIJob } from './jobStore';
-import { getDeviceId, getBaseUrl } from './api';
+import { useStore } from '../lib/store';
+import { useJobStore, AIJob } from '../lib/jobStore';
+import { getBaseUrl } from '../lib/api';
 
 const POLL_INTERVAL_MS = 5 * 60 * 1000;   // 5 minutes
 
