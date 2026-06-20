@@ -13,6 +13,7 @@ export default function SettingsScreen() {
   const [backendUrl, setBackendUrlState] = useState('');
   const [testing, setTesting]        = useState(false);
   const [testResult, setTestResult]  = useState<'ok' | 'fail' | null>(null);
+  const [testMessage, setTestMessage]= useState('');
   const [saving, setSaving]          = useState(false);
 
   useEffect(() => {
@@ -22,15 +23,21 @@ export default function SettingsScreen() {
 
   async function testApiKey() {
     if (!apiKey.trim()) return;
-    setTesting(true); setTestResult(null);
+    setTesting(true); setTestResult(null); setTestMessage('');
     try {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
+      const base = await getBaseUrl();
+      const res = await fetch(`${base}/api/ai/test-key`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey.trim() },
-        body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 10, messages: [{ role: 'user', content: 'ping' }] }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key: apiKey.trim() }),
       });
-      setTestResult(res.ok ? 'ok' : 'fail');
-    } catch { setTestResult('fail'); }
+      const data = await res.json();
+      setTestResult(data.valid ? 'ok' : 'fail');
+      setTestMessage(data.message || '');
+    } catch (e: any) {
+      setTestResult('fail');
+      setTestMessage(`Could not reach backend at ${backendUrl}: ${e.message}`);
+    }
     setTesting(false);
   }
 
@@ -87,8 +94,8 @@ export default function SettingsScreen() {
             </Text>
           )}
           {testResult === 'fail' && (
-            <Text style={{ fontFamily: FONT.mono, fontSize: 11, color: C.red, marginBottom: S.sm }}>
-              ✕ INVALID KEY OR NETWORK ERROR
+            <Text style={{ fontFamily: FONT.mono, fontSize: 11, color: C.red, marginBottom: S.sm, lineHeight: 16 }}>
+              ✕ {testMessage || 'Invalid key or network error'}
             </Text>
           )}
 

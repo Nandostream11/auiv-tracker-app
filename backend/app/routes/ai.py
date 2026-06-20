@@ -20,6 +20,7 @@ from fastapi import APIRouter, HTTPException, Query
 from datetime import datetime, timezone
 from typing import Optional
 from bson import ObjectId
+import httpx
 
 from app.db import jobs_col
 from app.models.models import (
@@ -34,6 +35,53 @@ def _serialize_job(doc: dict) -> dict:
     doc["id"] = str(doc.pop("_id"))
     doc.pop("api_key", None)   # never expose the key in responses
     return doc
+
+
+# ── Test key ──────────────────────────────────────────────────────────────
+
+@router.post("/test-key")
+async def test_key(body: dict):
+    """
+    Server-side proxy to validate an Anthropic API key.
+    Phones cannot reliably call api.anthropic.com directly (CORS / mobile
+    HTTP client restrictions on some Android/iOS network configs), so we
+    proxy the test call through our own backend and return the REAL
+    error message instead of a generic 'invalid key or network error'.
+    """
+    api_key = body.get("api_key", "").strip()
+    if not api_key:
+        return {"valid": False, "message": "No API key provided"}
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "Content-Type": "application/json",
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                },
+                json={
+                    "model": "claude-sonnet-4-20250514",
+                    "max_tokens": 10,
+                    "messages": [{"role": "user", "content": "ping"}],
+                },
+            )
+    except httpx.TimeoutException:
+        return {"valid": False, "message": "Request to Anthropic timed out. Try again."}
+    except Exception as e:
+        return {"valid": False, "message": f"Network error reaching Anthropic: {e}"}
+
+    if resp.status_code == 200:
+        return {"valid": True, "message": "Key is valid"}
+
+    try:
+        err_body = resp.json()
+        err_msg = err_body.get("error", {}).get("message", f"HTTP {resp.status_code}")
+    except Exception:
+        err_msg = f"HTTP {resp.status_code}"
+
+    return {"valid": False, "message": err_msg}
 
 
 # ── Evaluate ──────────────────────────────────────────────────────────────

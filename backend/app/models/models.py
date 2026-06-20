@@ -148,3 +148,13 @@ class AIJobResponse(BaseModel):
     next_retry_at: Optional[str]
     created_at: str
     updated_at: str
+
+
+# ── Key test ───────────────────────────────────────────────────────────────
+class TestKeyRequest(BaseModel):
+    api_key: str
+
+
+class TestKeyResponse(BaseModel):
+    valid: bool
+    message: str
