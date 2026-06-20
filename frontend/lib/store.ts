@@ -14,6 +14,8 @@ export interface Task {
   status: TaskStatus;
   notes: string;
   subtasks: string[];
+  start_date?: string | null;  // ISO date "YYYY-MM-DD"
+  due_date?: string | null;    // ISO date "YYYY-MM-DD"
   created_at: string;
   updated_at: string;
 }
@@ -140,4 +142,52 @@ export function statusColor(status: TaskStatus, C: any) {
 
 export function statusLabel(s: TaskStatus) {
   return s === 'done' ? 'DONE' : s === 'inprogress' ? 'IN PROGRESS' : s === 'blocked' ? 'BLOCKED' : 'TODO';
+}
+
+export type TimelineUrgency = 'overdue' | 'due_today' | 'due_soon' | 'on_track' | 'done' | 'no_date';
+
+export function getTimelineUrgency(task: Task): TimelineUrgency {
+  if (task.status === 'done') return 'done';
+  if (!task.due_date) return 'no_date';
+
+  const today = new Date(todayKey());
+  const due = new Date(task.due_date);
+  const msPerDay = 86400000;
+  const diffDays = Math.round((due.getTime() - today.getTime()) / msPerDay);
+
+  if (diffDays < 0) return 'overdue';
+  if (diffDays === 0) return 'due_today';
+  if (diffDays <= 2) return 'due_soon';
+  return 'on_track';
+}
+
+export function timelineUrgencyColor(u: TimelineUrgency, C: any): string {
+  switch (u) {
+    case 'overdue':   return C.red;
+    case 'due_today': return C.amber;
+    case 'due_soon':  return C.amber;
+    case 'done':      return C.green;
+    case 'on_track':  return C.textSecondary;
+    default:          return C.textDim;
+  }
+}
+
+export function timelineUrgencyLabel(u: TimelineUrgency, task: Task): string {
+  if (u === 'no_date') return 'No due date';
+  if (u === 'done') return 'Done';
+  if (!task.due_date) return '';
+  const today = new Date(todayKey());
+  const due = new Date(task.due_date);
+  const diffDays = Math.round((due.getTime() - today.getTime()) / 86400000);
+  if (diffDays < 0) return `${Math.abs(diffDays)}d overdue`;
+  if (diffDays === 0) return 'Due today';
+  if (diffDays === 1) return 'Due tomorrow';
+  return `Due in ${diffDays}d`;
+}
+
+export function formatDateShort(iso?: string | null): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return `${months[d.getMonth()]} ${d.getDate()}`;
 }

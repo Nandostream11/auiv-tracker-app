@@ -23,6 +23,8 @@ class TaskCreate(BaseModel):
     title: str
     detail: str
     done_criteria: str
+    start_date: Optional[str] = None   # ISO date "YYYY-MM-DD"
+    due_date: Optional[str] = None     # ISO date "YYYY-MM-DD"
 
 
 class TaskUpdate(BaseModel):
@@ -31,6 +33,8 @@ class TaskUpdate(BaseModel):
     done_criteria: Optional[str] = None
     status: Optional[str] = None   # todo | inprogress | done | blocked
     notes: Optional[str] = None
+    start_date: Optional[str] = None   # ISO date "YYYY-MM-DD"
+    due_date: Optional[str] = None     # ISO date "YYYY-MM-DD"
 
 
 class TaskResponse(BaseModel):
@@ -44,6 +48,8 @@ class TaskResponse(BaseModel):
     status: str
     notes: str
     subtasks: List[str]
+    start_date: Optional[str] = None
+    due_date: Optional[str] = None
     created_at: str
     updated_at: str
 

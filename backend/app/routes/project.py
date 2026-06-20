@@ -38,8 +38,13 @@ async def init_project(body: ProjectInit):
     # Seed tasks only if none exist for this device
     task_count = await tasks_col().count_documents({"device_id": device_id})
     if task_count == 0:
+        from datetime import timedelta
+        project_start = datetime.now(timezone.utc)
+
         docs = []
         for week in WEEKS_SEED:
+            week_due = (project_start + timedelta(weeks=week["num"])).date().isoformat()
+            week_start = (project_start + timedelta(weeks=week["num"] - 1)).date().isoformat()
             for t in week["tasks"]:
                 docs.append({
                     "device_id":    device_id,
@@ -53,6 +58,8 @@ async def init_project(body: ProjectInit):
                     "status":       "todo",
                     "notes":        "",
                     "subtasks":     [],
+                    "start_date":   week_start,
+                    "due_date":     week_due,
                     "created_at":   now,
                     "updated_at":   now,
                 })

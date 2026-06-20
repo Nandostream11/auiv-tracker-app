@@ -361,3 +361,127 @@ export function StreakCalendar({ loggedDates }: { loggedDates: Set<string> }) {
     </View>
   );
 }
+
+// ── DateStepper ───────────────────────────────────────────────────────────
+// Custom date picker — no native dependency, avoids build risk.
+// value/onChange use ISO date strings "YYYY-MM-DD". null = unset.
+export function DateStepper({
+  value, onChange, label, accent,
+}: {
+  value: string | null | undefined;
+  onChange: (iso: string | null) => void;
+  label: string;
+  accent?: string;
+}) {
+  const color = accent || C.orange;
+  const date = value ? new Date(value) : null;
+
+  function shiftDay(delta: number) {
+    const base = date || new Date();
+    const next = new Date(base);
+    next.setDate(next.getDate() + delta);
+    onChange(next.toISOString().slice(0, 10));
+  }
+
+  function setToday() {
+    onChange(new Date().toISOString().slice(0, 10));
+  }
+
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const display = date
+    ? `${months[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`
+    : 'NOT SET';
+
+  return (
+    <View>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: S.sm }}>
+        <Text style={{ fontFamily: FONT.mono, fontSize: 10, color: C.textDim, letterSpacing: 1.5, textTransform: 'uppercase' }}>
+          {label}
+        </Text>
+        {value && (
+          <TouchableOpacity onPress={() => onChange(null)} style={{ padding: 4 }}>
+            <Text style={{ fontFamily: FONT.mono, fontSize: 9, color: C.textDim }}>✕ CLEAR</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {!value ? (
+        <TouchableOpacity
+          onPress={setToday}
+          style={{
+            borderWidth: C.BORDER_W, borderColor: C.border, borderStyle: 'dashed',
+            paddingVertical: S.md, alignItems: 'center', minHeight: S.tapMin,
+            justifyContent: 'center',
+          }}>
+          <Text style={{ fontFamily: FONT.mono, fontSize: 12, color: C.textDim, letterSpacing: 1 }}>
+            + SET DATE
+          </Text>
+        </TouchableOpacity>
+      ) : (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: S.sm }}>
+          <TouchableOpacity
+            onPress={() => shiftDay(-1)}
+            style={{ borderWidth: C.BORDER_W, borderColor: C.border, padding: S.sm, minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ color: color, fontSize: 16, fontWeight: '900' }}>‹</Text>
+          </TouchableOpacity>
+
+          <View style={{
+            flex: 1, borderWidth: C.BORDER_W, borderColor: color,
+            backgroundColor: `${color}18`, paddingVertical: S.sm,
+            alignItems: 'center', minHeight: 44, justifyContent: 'center',
+          }}>
+            <Text style={{ fontFamily: FONT.mono, fontSize: 14, fontWeight: '900', color: color, letterSpacing: 1 }}>
+              {display}
+            </Text>
+          </View>
+
+          <TouchableOpacity
+            onPress={() => shiftDay(1)}
+            style={{ borderWidth: C.BORDER_W, borderColor: C.border, padding: S.sm, minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ color: color, fontSize: 16, fontWeight: '900' }}>›</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {value && (
+        <View style={{ flexDirection: 'row', gap: S.xs, marginTop: S.sm }}>
+          {[
+            { label: '-7D', delta: -7 },
+            { label: '-1D', delta: -1 },
+            { label: '+1D', delta: 1 },
+            { label: '+7D', delta: 7 },
+          ].map((b) => (
+            <TouchableOpacity
+              key={b.label}
+              onPress={() => shiftDay(b.delta)}
+              style={{
+                flex: 1, borderWidth: 1, borderColor: C.border,
+                paddingVertical: 6, alignItems: 'center',
+              }}>
+              <Text style={{ fontFamily: FONT.mono, fontSize: 9, color: C.textDim }}>{b.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+    </View>
+  );
+}
+
+// ── TimelineBadge ─────────────────────────────────────────────────────────
+// Compact urgency indicator for task list rows — shows days until/overdue.
+export function TimelineBadge({
+  label, color,
+}: { label: string; color: string }) {
+  if (!label) return null;
+  return (
+    <View style={{
+      borderWidth: 1, borderColor: color, backgroundColor: `${color}18`,
+      paddingHorizontal: 6, paddingVertical: 2, flexDirection: 'row', alignItems: 'center', gap: 3,
+    }}>
+      <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: color }} />
+      <Text style={{ fontFamily: FONT.mono, fontSize: 9, fontWeight: '700', color, letterSpacing: 0.5 }}>
+        {label.toUpperCase()}
+      </Text>
+    </View>
+  );
+}

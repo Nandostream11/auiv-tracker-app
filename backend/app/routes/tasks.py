@@ -45,6 +45,8 @@ async def create_task(body: TaskCreate):
         "status":        "todo",
         "notes":         "",
         "subtasks":      [],
+        "start_date":    body.start_date,
+        "due_date":      body.due_date,
         "created_at":    now,
         "updated_at":    now,
     }

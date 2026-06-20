@@ -76,6 +76,7 @@ export async function getWeekTasks(device_id: string, week_num: number) {
 export async function createTask(body: {
   device_id: string; week_num: number; task_id: string;
   title: string; detail: string; done_criteria: string;
+  start_date?: string; due_date?: string;
 }) {
   return request<any>('POST', '/api/tasks/', body);
 }
@@ -83,6 +84,7 @@ export async function createTask(body: {
 export async function updateTask(mongoId: string, fields: {
   title?: string; detail?: string; done_criteria?: string;
   status?: string; notes?: string;
+  start_date?: string; due_date?: string;
 }) {
   return request<any>('PATCH', `/api/tasks/${mongoId}`, fields);
 }

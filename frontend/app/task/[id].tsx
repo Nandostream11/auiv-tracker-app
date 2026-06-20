@@ -5,13 +5,14 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useStore, statusColor, statusLabel, todayKey } from '../../lib/store';
+import { useStore, statusColor, statusLabel, todayKey, getTimelineUrgency, timelineUrgencyColor, timelineUrgencyLabel } from '../../lib/store';
 import {
   BrutalBox, BrutalBtn, BrutalBar, SectionLabel,
   BrutalInput, TagPill, StatusCycleBtn, Mono, Divider,
+  DateStepper, TimelineBadge,
 } from '../../components/ui';
 import { C, S, FONT } from '../../constants/theme';
-import { updateTask, suggestSubtasks, getApiKey, getLogsForTask } from '../../lib/api';
+import { updateTask, suggestSubtasks, setSubtasks as patchSubtasksApi, getApiKey, getLogsForTask } from '../../lib/api';
 
 export default function TaskDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -88,6 +89,21 @@ export default function TaskDetailScreen() {
     setSavingEdit(false);
   }
 
+  // Timeline: start/due date changes — auto-save on every change
+  async function handleStartDateChange(iso: string | null) {
+    try {
+      const updated = await updateTask(task.id, { start_date: iso || '' });
+      upsertTask(updated);
+    } catch (e: any) { Alert.alert('ERROR', e.message); }
+  }
+
+  async function handleDueDateChange(iso: string | null) {
+    try {
+      const updated = await updateTask(task.id, { due_date: iso || '' });
+      upsertTask(updated);
+    } catch (e: any) { Alert.alert('ERROR', e.message); }
+  }
+
   // AI subtask suggestions
   async function handleSuggestSubtasks() {
     const apiKey = await getApiKey();
@@ -105,15 +121,25 @@ export default function TaskDetailScreen() {
         done_criteria: task.done_criteria,
         current_notes: task.notes,
       });
-      const newSubtasks = res.subtasks || [];
+
+      if (res.status === 'pending') {
+        // Claude timed out — backend queued a retry job (fires in ~5h).
+        // Don't silently show an empty list; tell the user what happened.
+        Alert.alert(
+          'QUEUED',
+          res.message || 'Claude is unavailable right now. Your request was queued and will retry automatically.'
+        );
+        return;
+      }
+
+      const newSubtasks: string[] = res.result?.subtasks || [];
+      if (newSubtasks.length === 0) {
+        Alert.alert('NO SUGGESTIONS', 'The AI did not return any subtasks. Try again.');
+        return;
+      }
+
       setSubtasks(newSubtasks);
-      const updated = await updateTask(task.id, {});
-      // patch subtasks directly
-      await fetch(`${await (await import('../../lib/api')).getBaseUrl()}/api/tasks/${task.id}/subtasks`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newSubtasks),
-      });
+      await patchSubtasksApi(task.id, newSubtasks);
       upsertTask({ ...task, subtasks: newSubtasks });
     } catch (e: any) {
       Alert.alert('AI ERROR', e.message);
@@ -185,6 +211,41 @@ export default function TaskDetailScreen() {
             {task.done_criteria}
           </Text>
         </View>
+
+        {/* Timeline */}
+        <BrutalBox style={{ padding: S.md }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: S.md }}>
+            <SectionLabel color={C.orange}>TIMELINE</SectionLabel>
+            {(() => {
+              const urgency = getTimelineUrgency(task);
+              const label = timelineUrgencyLabel(urgency, task);
+              if (urgency === 'no_date' || urgency === 'done') return null;
+              return <TimelineBadge label={label} color={timelineUrgencyColor(urgency, C)} />;
+            })()}
+          </View>
+
+          <View style={{ marginBottom: S.md }}>
+            <DateStepper
+              label="Start Date"
+              value={task.start_date}
+              onChange={handleStartDateChange}
+              accent={C.textSecondary}
+            />
+          </View>
+
+          <DateStepper
+            label="Due Date"
+            value={task.due_date}
+            onChange={handleDueDateChange}
+            accent={timelineUrgencyColor(getTimelineUrgency(task), C)}
+          />
+
+          {task.start_date && task.due_date && (
+            <Text style={{ fontFamily: FONT.mono, fontSize: 10, color: C.textDim, marginTop: S.sm, textAlign: 'center' }}>
+              {Math.max(0, Math.round((new Date(task.due_date).getTime() - new Date(task.start_date).getTime()) / 86400000))} day window
+            </Text>
+          )}
+        </BrutalBox>
 
         {/* Notes */}
         <BrutalBox style={{ padding: S.md }}>

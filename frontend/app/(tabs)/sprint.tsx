@@ -5,10 +5,11 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useStore, getWeekProgress, statusColor, statusLabel } from '../../lib/store';
+import { useStore, getWeekProgress, statusColor, statusLabel, getTimelineUrgency, timelineUrgencyColor, timelineUrgencyLabel } from '../../lib/store';
 import {
   BrutalBox, BrutalBtn, BrutalBar, SectionLabel,
   Mono, TagPill, Divider, BrutalInput, StatusCycleBtn, Spinner,
+  TimelineBadge,
 } from '../../components/ui';
 import { C, S, FONT } from '../../constants/theme';
 import { createTask, deleteTask, updateTask } from '../../lib/api';
@@ -180,6 +181,18 @@ export default function SprintScreen() {
               <Text style={{ fontFamily: FONT.mono, fontSize: 11, color: C.textSecondary, marginBottom: 8 }}>
                 {task.detail}
               </Text>
+              {(() => {
+                const urgency = getTimelineUrgency(task);
+                if (urgency === 'no_date' || urgency === 'done') return null;
+                return (
+                  <View style={{ marginBottom: 8, alignSelf: 'flex-start' }}>
+                    <TimelineBadge
+                      label={timelineUrgencyLabel(urgency, task)}
+                      color={timelineUrgencyColor(urgency, C)}
+                    />
+                  </View>
+                );
+              })()}
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <StatusCycleBtn status={task.status} onCycle={() => handleCycleStatus(task)} />
                 <TouchableOpacity
