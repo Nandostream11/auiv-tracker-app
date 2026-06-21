@@ -9,7 +9,7 @@ import { useStore, statusColor, statusLabel, todayKey, getTimelineUrgency, timel
 import {
   BrutalBox, BrutalBtn, BrutalBar, SectionLabel,
   BrutalInput, TagPill, StatusCycleBtn, Mono, Divider,
-  DateStepper, TimelineBadge,
+  DateStepper, TimelineBadge, EvalStatusBadge, EvalStatusDetail,
 } from '../../components/ui';
 import { C, S, FONT } from '../../constants/theme';
 import { updateTask, suggestSubtasks, setSubtasks as patchSubtasksApi, getApiKey, getLogsForTask } from '../../lib/api';
@@ -375,6 +375,25 @@ export default function TaskDetailScreen() {
           </View>
         )}
 
+        {/* No completed eval yet — show WHY instead of nothing */}
+        {!ev && latestLog && (
+          <View style={{
+            borderWidth: C.BORDER_W,
+            borderColor: latestLog.eval_status === 'failed' ? C.red : C.amber,
+            backgroundColor: C.surface, marginBottom: S.sm,
+          }}>
+            <View style={{ padding: S.md, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text style={{ fontFamily: FONT.mono, fontSize: 10, color: latestLog.eval_status === 'failed' ? C.red : C.amber, letterSpacing: 2 }}>
+                ◈ LATEST EVAL — {latestLog.date}
+              </Text>
+              <EvalStatusBadge log={latestLog} />
+            </View>
+            <View style={{ paddingHorizontal: S.md, paddingBottom: S.md }}>
+              <EvalStatusDetail log={latestLog} />
+            </View>
+          </View>
+        )}
+
         {/* Session history */}
         {taskLogs.length > 0 && (
           <BrutalBox style={{ padding: S.md }}>
@@ -387,14 +406,9 @@ export default function TaskDetailScreen() {
               }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                   <Text style={{ fontFamily: FONT.mono, fontSize: 12, color: C.white, fontWeight: '700' }}>{log.date}</Text>
-                  {log.ai_eval && (
-                    <TagPill
-                      label={`${log.ai_eval.completion_pct}%`}
-                      color={log.ai_eval.momentum === 'strong' ? C.green : log.ai_eval.momentum === 'ok' ? C.orange : C.red}
-                      bg={log.ai_eval.momentum === 'strong' ? C.greenGhost : C.orangeGhost}
-                    />
-                  )}
+                  <EvalStatusBadge log={log} />
                 </View>
+                <EvalStatusDetail log={log} />
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginBottom: log.blocker ? 4 : 0 }}>
                   {Object.entries(log.checks || {})
                     .filter(([, v]) => v)

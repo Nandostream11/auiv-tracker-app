@@ -485,3 +485,101 @@ export function TimelineBadge({
     </View>
   );
 }
+
+// ── EvalStatusBadge ───────────────────────────────────────────────────────
+// Renders an explicit, unambiguous indicator for ANY eval state.
+// This exists specifically to eliminate the "silent gap" bug where a log
+// with no ai_eval rendered absolutely nothing — making it indistinguishable
+// whether the eval was still queued, had permanently failed, or was never
+// attempted at all (e.g. no API key was set when the standup was submitted).
+export function EvalStatusBadge({ log }: { log: any }) {
+  const status = log.eval_status || (log.ai_eval ? 'completed' : 'never_attempted');
+
+  if (status === 'completed' && log.ai_eval) {
+    const ev = log.ai_eval;
+    return (
+      <TagPill
+        label={`${ev.completion_pct}%`}
+        color={ev.momentum === 'strong' ? C.green : ev.momentum === 'ok' ? C.orange : C.red}
+        bg={ev.momentum === 'strong' ? C.greenGhost : C.orangeGhost}
+      />
+    );
+  }
+
+  if (status === 'pending' || status === 'running') {
+    return (
+      <View style={{
+        flexDirection: 'row', alignItems: 'center', gap: 4,
+        borderWidth: 1, borderColor: C.amber, backgroundColor: C.amberGhost,
+        paddingHorizontal: 6, paddingVertical: 2,
+      }}>
+        <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: C.amber }} />
+        <Text style={{ fontFamily: FONT.mono, fontSize: 9, fontWeight: '700', color: C.amber, letterSpacing: 0.5 }}>
+          QUEUED · ATTEMPT {(log.eval_retries || 0) + 1}/5
+        </Text>
+      </View>
+    );
+  }
+
+  if (status === 'failed') {
+    return (
+      <View style={{
+        borderWidth: 1, borderColor: C.red, backgroundColor: C.redGhost,
+        paddingHorizontal: 6, paddingVertical: 2,
+      }}>
+        <Text style={{ fontFamily: FONT.mono, fontSize: 9, fontWeight: '700', color: C.red, letterSpacing: 0.5 }}>
+          EVAL FAILED — RETRY EXHAUSTED
+        </Text>
+      </View>
+    );
+  }
+
+  // never_attempted — most likely cause: no API key was set yet
+  return (
+    <View style={{
+      borderWidth: 1, borderColor: C.border, backgroundColor: C.surfaceHigh,
+      paddingHorizontal: 6, paddingVertical: 2,
+    }}>
+      <Text style={{ fontFamily: FONT.mono, fontSize: 9, color: C.textDim, letterSpacing: 0.5 }}>
+        NO AI EVAL
+      </Text>
+    </View>
+  );
+}
+
+// ── EvalStatusDetail ──────────────────────────────────────────────────────
+// Expanded explanation shown below the badge — tells the user exactly
+// what's happening and what (if anything) they need to do.
+export function EvalStatusDetail({ log }: { log: any }) {
+  const status = log.eval_status || (log.ai_eval ? 'completed' : 'never_attempted');
+
+  if (status === 'pending' || status === 'running') {
+    const retryAt = log.eval_retry_at ? new Date(log.eval_retry_at) : null;
+    const now = new Date();
+    const diffMs = retryAt ? retryAt.getTime() - now.getTime() : 0;
+    const diffHrs = Math.max(0, Math.ceil(diffMs / 3600000));
+    return (
+      <Text style={{ fontFamily: FONT.mono, fontSize: 10, color: C.amber, marginTop: 4, lineHeight: 15 }}>
+        Last error: {log.eval_error || 'timeout'}. Next retry in ~{diffHrs}h.
+      </Text>
+    );
+  }
+
+  if (status === 'failed') {
+    return (
+      <Text style={{ fontFamily: FONT.mono, fontSize: 10, color: C.red, marginTop: 4, lineHeight: 15 }}>
+        All 5 attempts failed. Last error: {log.eval_error || 'unknown'}. Check your API key in Settings, then re-submit this standup to retry.
+      </Text>
+    );
+  }
+
+  if (status === 'never_attempted') {
+    return (
+      <Text style={{ fontFamily: FONT.mono, fontSize: 10, color: C.textDim, marginTop: 4, lineHeight: 15 }}>
+        No API key was set when this was submitted. Add one in Settings, then re-submit to get an eval.
+      </Text>
+    );
+  }
+
+  return null;
+}

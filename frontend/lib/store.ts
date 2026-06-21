@@ -31,6 +31,10 @@ export interface DailyLog {
   next_action: string;
   tomorrow_task: string;
   ai_eval: any | null;
+  eval_status?: 'completed' | 'pending' | 'running' | 'failed' | 'never_attempted';
+  eval_error?: string | null;
+  eval_retry_at?: string | null;
+  eval_retries?: number;
   created_at: string;
   updated_at: string;
 }

@@ -154,7 +154,30 @@ export default function DailyScreen() {
 
   const today    = todayKey();
   const existing = logs.find(l => l.date === today);
-  const todayJob = getJobForDate(today);
+  const clientJob = getJobForDate(today);
+
+  // Prefer the client-side job store (it has live retry countdown data),
+  // but fall back to the backend-enriched log status if the client store
+  // hasn't caught up yet (e.g. fresh app install, or app was closed before
+  // the poller ever ran). This makes the pending/failed banners resilient
+  // to client-state loss instead of silently showing nothing.
+  const todayJob = clientJob || (existing && existing.eval_status && existing.eval_status !== 'completed'
+    ? {
+        jobId:       '',
+        deviceId,
+        logId:       existing.id,
+        taskId:      existing.task_id,
+        date:        today,
+        jobType:     'evaluate' as const,
+        status:      existing.eval_status,
+        nextRetryAt: existing.eval_retry_at || null,
+        retryCount:  existing.eval_retries || 0,
+        result:      null,
+        error:       existing.eval_error || null,
+        createdAt:   existing.created_at,
+        updatedAt:   existing.updated_at,
+      }
+    : null);
 
   const [checks,      setChecks]      = useState<Record<string, boolean>>(existing?.checks || {});
   const [taskId,      setTaskId]      = useState(existing?.task_id || '');
