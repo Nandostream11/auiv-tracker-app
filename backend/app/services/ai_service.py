@@ -26,25 +26,30 @@ from app.models.seed_data import CHECKLIST_ITEMS
 
 logger = logging.getLogger("ai_service")
 
-ANTHROPIC_URL  = "https://api.anthropic.com/v1/messages"
-GEMINI_URL     = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-CLAUDE_MODEL   = "claude-sonnet-4-20250514"
-GEMINI_MODEL   = "gemini-2.5-flash"
-TIMEOUT_S      = 28          # slightly under 30 so we catch it cleanly
-RETRY_HOURS    = 5
-MAX_RETRIES    = 5
+ANTHROPIC_URL   = "https://api.anthropic.com/v1/messages"
+GEMINI_URL      = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+OPENROUTER_URL  = "https://openrouter.ai/api/v1/chat/completions"
+CLAUDE_MODEL    = "claude-sonnet-4-20250514"
+GEMINI_MODEL    = "gemini-2.5-flash"
+OPENROUTER_MODEL = "openrouter/free"
+TIMEOUT_S       = 28          # slightly under 30 so we catch it cleanly
+RETRY_HOURS     = 5
+MAX_RETRIES     = 5
 
 
 def detect_provider(api_key: str) -> str:
     """
     Anthropic keys start with 'sk-ant-'.
     Gemini (Google AI Studio) keys start with 'AIza'.
+    OpenRouter keys start with 'sk-or-v1-'.
     Defaults to anthropic if the format is unrecognized, since that was
     the original/only supported provider.
     """
     key = (api_key or "").strip()
     if key.startswith("AIza"):
         return "gemini"
+    if key.startswith("sk-or-v1-"):
+        return "openrouter"
     return "anthropic"
 
 
@@ -163,6 +168,47 @@ async def _call_gemini(api_key: str, prompt: str, max_tokens: int = 800) -> Dict
     return json.loads(clean)
 
 
+async def _call_openrouter(api_key: str, prompt: str, max_tokens: int = 800) -> Dict[str, Any]:
+    """
+    Call OpenRouter (free tier, openrouter.ai).
+    OpenAI-compatible schema: standard Bearer auth, response in
+    choices[0].message.content. Uses response_format json_object to
+    request valid JSON output directly, same pattern as Gemini.
+    Uses the 'openrouter/free' auto-router so it always resolves to
+    *some* currently-available free model rather than a specific slug
+    that might get deprecated or rate-limited.
+    """
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+    }
+    body = {
+        "model": OPENROUTER_MODEL,
+        "max_tokens": max_tokens,
+        "messages": [{"role": "user", "content": prompt}],
+        "response_format": {"type": "json_object"},
+    }
+    async with httpx.AsyncClient(timeout=TIMEOUT_S) as client:
+        resp = await client.post(OPENROUTER_URL, headers=headers, json=body)
+
+    if resp.status_code != 200:
+        try:
+            err = resp.json()
+            msg = err.get("error", {}).get("message", f"HTTP {resp.status_code}")
+        except Exception:
+            msg = f"HTTP {resp.status_code}"
+        raise RuntimeError(msg)
+
+    data = resp.json()
+    choices = data.get("choices", [])
+    if not choices:
+        raise RuntimeError("OpenRouter returned no choices")
+
+    raw = choices[0].get("message", {}).get("content", "")
+    clean = raw.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+    return json.loads(clean)
+
+
 async def _call_llm(api_key: str, prompt: str, max_tokens: int = 800) -> Dict[str, Any]:
     """
     Dispatches to the correct provider based on API key format.
@@ -174,6 +220,8 @@ async def _call_llm(api_key: str, prompt: str, max_tokens: int = 800) -> Dict[st
     provider = detect_provider(api_key)
     if provider == "gemini":
         return await _call_gemini(api_key, prompt, max_tokens)
+    if provider == "openrouter":
+        return await _call_openrouter(api_key, prompt, max_tokens)
     return await _call_claude(api_key, prompt, max_tokens)
 
 

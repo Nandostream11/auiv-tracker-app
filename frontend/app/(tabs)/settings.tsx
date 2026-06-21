@@ -105,8 +105,9 @@ export default function SettingsScreen() {
           <SectionLabel color={C.orange}>AI API KEY</SectionLabel>
           <View style={{ marginBottom: S.sm, borderWidth: 1, borderColor: C.amberGhost, backgroundColor: `${C.amber}08`, padding: S.sm }}>
             <Text style={{ fontFamily: FONT.mono, fontSize: 11, color: C.amber, lineHeight: 18 }}>
-              Two options — paste either key, it's auto-detected:{'\n\n'}
-              <Text style={{ color: C.green, fontWeight: '900' }}>FREE:</Text> Gemini key from aistudio.google.com (no credit card, ~500 req/day){'\n'}
+              Three options — paste any key, it's auto-detected:{'\n\n'}
+              <Text style={{ color: C.green, fontWeight: '900' }}>FREE (recommended):</Text> OpenRouter key from openrouter.ai (no credit card, 50 req/day){'\n'}
+              <Text style={{ color: C.textDim }}>FREE (unreliable):</Text> Gemini key from aistudio.google.com — many Google accounts are currently issued broken "AQ." keys instead of working "AIza" keys{'\n'}
               <Text style={{ color: C.textPrimary }}>PAID:</Text> Claude key from console.anthropic.com{'\n\n'}
               Stored in SecureStore on this device only — never sent anywhere except the provider you choose.
             </Text>
@@ -116,7 +117,7 @@ export default function SettingsScreen() {
             <BrutalInput
               value={showKey ? apiKey : apiKey.replace(/./g, '•')}
               onChangeText={setApiKeyState}
-              placeholder="AIza... (free) or sk-ant-... (paid)"
+              placeholder="sk-or-v1-... (free) or AIza... or sk-ant-..."
             />
             <TouchableOpacity
               onPress={() => setShowKey((s) => !s)}
@@ -147,16 +148,27 @@ export default function SettingsScreen() {
             </View>
           </View>
 
+          <TouchableOpacity
+            onPress={() => Linking.openURL('https://openrouter.ai/keys')}
+            style={{
+              borderWidth: C.BORDER_W, borderColor: C.green,
+              backgroundColor: C.greenGhost, marginBottom: S.sm,
+              padding: S.md, justifyContent: 'center', alignItems: 'center', minHeight: S.tapMin,
+            }}>
+            <Text style={{ fontFamily: FONT.mono, fontSize: 11, color: C.green, letterSpacing: 1, fontWeight: '900' }}>
+              GET FREE OPENROUTER KEY ↗
+            </Text>
+          </TouchableOpacity>
+
           <View style={{ flexDirection: 'row', gap: S.sm }}>
             <TouchableOpacity
               onPress={() => Linking.openURL('https://aistudio.google.com/app/apikey')}
               style={{
-                flex: 1, borderWidth: C.BORDER_W, borderColor: C.green,
-                backgroundColor: C.greenGhost,
+                flex: 1, borderWidth: C.BORDER_W, borderColor: C.border,
                 padding: S.md, justifyContent: 'center', alignItems: 'center', minHeight: S.tapMin,
               }}>
-              <Text style={{ fontFamily: FONT.mono, fontSize: 10, color: C.green, letterSpacing: 1, fontWeight: '900' }}>
-                GET FREE KEY ↗
+              <Text style={{ fontFamily: FONT.mono, fontSize: 10, color: C.textDim, letterSpacing: 1 }}>
+                GET GEMINI KEY ↗
               </Text>
             </TouchableOpacity>
             <TouchableOpacity

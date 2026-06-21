@@ -43,12 +43,16 @@ def _serialize_job(doc: dict) -> dict:
 @router.post("/test-key")
 async def test_key(body: dict):
     """
-    Server-side proxy to validate an API key — works for both Anthropic
-    and Gemini (Google AI Studio) free-tier keys, auto-detected by prefix.
-    Phones cannot reliably call provider APIs directly (CORS / mobile
-    HTTP client restrictions on some Android/iOS network configs), so we
-    proxy the test call through our own backend and return the REAL
+    Server-side proxy to validate an API key — works for Anthropic,
+    Gemini (Google AI Studio), and OpenRouter free-tier keys, auto-detected
+    by prefix. Phones cannot reliably call provider APIs directly (CORS /
+    mobile HTTP client restrictions on some Android/iOS network configs),
+    so we proxy the test call through our own backend and return the REAL
     error message instead of a generic 'invalid key or network error'.
+
+    Deliberately does NOT reuse _call_llm() from ai_service — that function
+    expects the model to return parseable JSON matching our eval schema,
+    which a simple "ping" test won't satisfy. This just checks auth.
     """
     from app.services.ai_service import detect_provider
 
@@ -57,6 +61,11 @@ async def test_key(body: dict):
         return {"valid": False, "message": "No API key provided", "provider": None}
 
     provider = detect_provider(api_key)
+    provider_labels = {
+        "gemini":     "Gemini (free tier)",
+        "openrouter": "OpenRouter (free tier)",
+        "anthropic":  "Claude",
+    }
 
     try:
         async with httpx.AsyncClient(timeout=15) as client:
@@ -70,6 +79,19 @@ async def test_key(body: dict):
                     json={
                         "contents": [{"parts": [{"text": "ping"}]}],
                         "generationConfig": {"maxOutputTokens": 5},
+                    },
+                )
+            elif provider == "openrouter":
+                resp = await client.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {api_key}",
+                    },
+                    json={
+                        "model": "openrouter/free",
+                        "max_tokens": 5,
+                        "messages": [{"role": "user", "content": "ping"}],
                     },
                 )
             else:
@@ -92,15 +114,12 @@ async def test_key(body: dict):
         return {"valid": False, "message": f"Network error reaching {provider}: {e}", "provider": provider}
 
     if resp.status_code == 200:
-        label = "Gemini (free tier)" if provider == "gemini" else "Claude"
+        label = provider_labels.get(provider, provider)
         return {"valid": True, "message": f"Key is valid — {label}", "provider": provider}
 
     try:
         err_body = resp.json()
-        if provider == "gemini":
-            err_msg = err_body.get("error", {}).get("message", f"HTTP {resp.status_code}")
-        else:
-            err_msg = err_body.get("error", {}).get("message", f"HTTP {resp.status_code}")
+        err_msg = err_body.get("error", {}).get("message", f"HTTP {resp.status_code}")
     except Exception:
         err_msg = f"HTTP {resp.status_code}"
 
