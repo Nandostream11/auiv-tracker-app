@@ -27,10 +27,25 @@ from app.models.seed_data import CHECKLIST_ITEMS
 logger = logging.getLogger("ai_service")
 
 ANTHROPIC_URL  = "https://api.anthropic.com/v1/messages"
-MODEL          = "claude-sonnet-4-20250514"
+GEMINI_URL     = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+CLAUDE_MODEL   = "claude-sonnet-4-20250514"
+GEMINI_MODEL   = "gemini-2.5-flash"
 TIMEOUT_S      = 28          # slightly under 30 so we catch it cleanly
 RETRY_HOURS    = 5
 MAX_RETRIES    = 5
+
+
+def detect_provider(api_key: str) -> str:
+    """
+    Anthropic keys start with 'sk-ant-'.
+    Gemini (Google AI Studio) keys start with 'AIza'.
+    Defaults to anthropic if the format is unrecognized, since that was
+    the original/only supported provider.
+    """
+    key = (api_key or "").strip()
+    if key.startswith("AIza"):
+        return "gemini"
+    return "anthropic"
 
 
 # ── Prompt builders ───────────────────────────────────────────────────────
@@ -88,7 +103,7 @@ async def _call_claude(api_key: str, prompt: str, max_tokens: int = 800) -> Dict
         "anthropic-version": "2023-06-01",
     }
     body = {
-        "model": MODEL,
+        "model": CLAUDE_MODEL,
         "max_tokens": max_tokens,
         "messages": [{"role": "user", "content": prompt}],
     }
@@ -105,6 +120,61 @@ async def _call_claude(api_key: str, prompt: str, max_tokens: int = 800) -> Dict
     raw = "".join(b.get("text", "") for b in data.get("content", []))
     clean = raw.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
     return json.loads(clean)
+
+
+async def _call_gemini(api_key: str, prompt: str, max_tokens: int = 800) -> Dict[str, Any]:
+    """
+    Call Google Gemini (free tier, Google AI Studio).
+    Uses responseMimeType=application/json to force valid JSON output
+    directly from the model, rather than relying on prompt instructions
+    alone (which is what we have to do for Claude).
+    """
+    url = GEMINI_URL.format(model=GEMINI_MODEL)
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": api_key,
+    }
+    body = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "maxOutputTokens": max_tokens,
+            "responseMimeType": "application/json",
+        },
+    }
+    async with httpx.AsyncClient(timeout=TIMEOUT_S) as client:
+        resp = await client.post(url, headers=headers, json=body)
+
+    if resp.status_code != 200:
+        try:
+            err = resp.json()
+            msg = err.get("error", {}).get("message", f"HTTP {resp.status_code}")
+        except Exception:
+            msg = f"HTTP {resp.status_code}"
+        raise RuntimeError(msg)
+
+    data = resp.json()
+    candidates = data.get("candidates", [])
+    if not candidates:
+        raise RuntimeError("Gemini returned no candidates (possibly blocked by safety filters)")
+
+    parts = candidates[0].get("content", {}).get("parts", [])
+    raw = "".join(p.get("text", "") for p in parts)
+    clean = raw.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+    return json.loads(clean)
+
+
+async def _call_llm(api_key: str, prompt: str, max_tokens: int = 800) -> Dict[str, Any]:
+    """
+    Dispatches to the correct provider based on API key format.
+    This is the ONLY function the rest of this module should call —
+    attempt_evaluation() and run_pending_retries() both go through here,
+    so a key pasted into Settings works regardless of which provider
+    it belongs to, with zero frontend changes required.
+    """
+    provider = detect_provider(api_key)
+    if provider == "gemini":
+        return await _call_gemini(api_key, prompt, max_tokens)
+    return await _call_claude(api_key, prompt, max_tokens)
 
 
 # ── Job persistence ───────────────────────────────────────────────────────
@@ -197,20 +267,21 @@ async def attempt_evaluation(
     """
     prompt = _build_prompt(job_type, payload)
     max_tokens = 800 if job_type == "evaluate" else 600
+    provider = detect_provider(api_key)
 
     try:
-        result = await _call_claude(api_key, prompt, max_tokens)
+        result = await _call_llm(api_key, prompt, max_tokens)
         if log_id:
             await _write_eval_to_log(log_id, result)
         return result
 
     except (httpx.TimeoutException, httpx.ReadTimeout, httpx.ConnectTimeout) as e:
-        logger.warning(f"Claude timeout for device={device_id} log={log_id}: {e}")
+        logger.warning(f"{provider} timeout for device={device_id} log={log_id}: {e}")
         job_id = await create_job(device_id, log_id, job_type, api_key, payload)
         raise AIJobQueued(job_id=job_id, reason="timeout")
 
     except Exception as e:
-        logger.error(f"Claude error for device={device_id}: {e}")
+        logger.error(f"{provider} error for device={device_id}: {e}")
         job_id = await create_job(device_id, log_id, job_type, api_key, payload)
         raise AIJobQueued(job_id=job_id, reason=str(e))
 
@@ -258,7 +329,7 @@ async def run_pending_retries():
         max_tokens = 800 if job_type == "evaluate" else 600
 
         try:
-            result = await _call_claude(api_key, prompt, max_tokens)
+            result = await _call_llm(api_key, prompt, max_tokens)
             await _write_eval_to_log(log_id, result)
             await _mark_completed(job_id, result)
             logger.info(f"Job {job_id} completed on retry {retries + 1}")

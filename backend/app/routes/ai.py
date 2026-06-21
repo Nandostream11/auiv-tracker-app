@@ -43,46 +43,68 @@ def _serialize_job(doc: dict) -> dict:
 @router.post("/test-key")
 async def test_key(body: dict):
     """
-    Server-side proxy to validate an Anthropic API key.
-    Phones cannot reliably call api.anthropic.com directly (CORS / mobile
+    Server-side proxy to validate an API key — works for both Anthropic
+    and Gemini (Google AI Studio) free-tier keys, auto-detected by prefix.
+    Phones cannot reliably call provider APIs directly (CORS / mobile
     HTTP client restrictions on some Android/iOS network configs), so we
     proxy the test call through our own backend and return the REAL
     error message instead of a generic 'invalid key or network error'.
     """
+    from app.services.ai_service import detect_provider
+
     api_key = body.get("api_key", "").strip()
     if not api_key:
-        return {"valid": False, "message": "No API key provided"}
+        return {"valid": False, "message": "No API key provided", "provider": None}
+
+    provider = detect_provider(api_key)
 
     try:
         async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "Content-Type": "application/json",
-                    "x-api-key": api_key,
-                    "anthropic-version": "2023-06-01",
-                },
-                json={
-                    "model": "claude-sonnet-4-20250514",
-                    "max_tokens": 10,
-                    "messages": [{"role": "user", "content": "ping"}],
-                },
-            )
+            if provider == "gemini":
+                resp = await client.post(
+                    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+                    headers={
+                        "Content-Type": "application/json",
+                        "x-goog-api-key": api_key,
+                    },
+                    json={
+                        "contents": [{"parts": [{"text": "ping"}]}],
+                        "generationConfig": {"maxOutputTokens": 5},
+                    },
+                )
+            else:
+                resp = await client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "Content-Type": "application/json",
+                        "x-api-key": api_key,
+                        "anthropic-version": "2023-06-01",
+                    },
+                    json={
+                        "model": "claude-sonnet-4-20250514",
+                        "max_tokens": 10,
+                        "messages": [{"role": "user", "content": "ping"}],
+                    },
+                )
     except httpx.TimeoutException:
-        return {"valid": False, "message": "Request to Anthropic timed out. Try again."}
+        return {"valid": False, "message": f"Request to {provider} timed out. Try again.", "provider": provider}
     except Exception as e:
-        return {"valid": False, "message": f"Network error reaching Anthropic: {e}"}
+        return {"valid": False, "message": f"Network error reaching {provider}: {e}", "provider": provider}
 
     if resp.status_code == 200:
-        return {"valid": True, "message": "Key is valid"}
+        label = "Gemini (free tier)" if provider == "gemini" else "Claude"
+        return {"valid": True, "message": f"Key is valid — {label}", "provider": provider}
 
     try:
         err_body = resp.json()
-        err_msg = err_body.get("error", {}).get("message", f"HTTP {resp.status_code}")
+        if provider == "gemini":
+            err_msg = err_body.get("error", {}).get("message", f"HTTP {resp.status_code}")
+        else:
+            err_msg = err_body.get("error", {}).get("message", f"HTTP {resp.status_code}")
     except Exception:
         err_msg = f"HTTP {resp.status_code}"
 
-    return {"valid": False, "message": err_msg}
+    return {"valid": False, "message": err_msg, "provider": provider}
 
 
 # ── Evaluate ──────────────────────────────────────────────────────────────

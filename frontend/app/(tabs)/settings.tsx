@@ -102,11 +102,13 @@ export default function SettingsScreen() {
 
         {/* API Key */}
         <BrutalBox style={{ padding: S.md }}>
-          <SectionLabel color={C.orange}>ANTHROPIC API KEY</SectionLabel>
+          <SectionLabel color={C.orange}>AI API KEY</SectionLabel>
           <View style={{ marginBottom: S.sm, borderWidth: 1, borderColor: C.amberGhost, backgroundColor: `${C.amber}08`, padding: S.sm }}>
             <Text style={{ fontFamily: FONT.mono, fontSize: 11, color: C.amber, lineHeight: 18 }}>
-              Claude.ai accounts and the API use separate credentials. Get a key at console.anthropic.com → API Keys.
-              Stored in SecureStore on this device only.
+              Two options — paste either key, it's auto-detected:{'\n\n'}
+              <Text style={{ color: C.green, fontWeight: '900' }}>FREE:</Text> Gemini key from aistudio.google.com (no credit card, ~500 req/day){'\n'}
+              <Text style={{ color: C.textPrimary }}>PAID:</Text> Claude key from console.anthropic.com{'\n\n'}
+              Stored in SecureStore on this device only — never sent anywhere except the provider you choose.
             </Text>
           </View>
 
@@ -114,7 +116,7 @@ export default function SettingsScreen() {
             <BrutalInput
               value={showKey ? apiKey : apiKey.replace(/./g, '•')}
               onChangeText={setApiKeyState}
-              placeholder="sk-ant-api03-..."
+              placeholder="AIza... (free) or sk-ant-... (paid)"
             />
             <TouchableOpacity
               onPress={() => setShowKey((s) => !s)}
@@ -130,7 +132,7 @@ export default function SettingsScreen() {
 
           {testResult === 'ok' && (
             <Text style={{ fontFamily: FONT.mono, fontSize: 11, color: C.green, marginBottom: S.sm }}>
-              ✓ KEY VALID — AI EVAL ENABLED
+              ✓ {testMessage || 'KEY VALID — AI EVAL ENABLED'}
             </Text>
           )}
           {testResult === 'fail' && (
@@ -139,18 +141,32 @@ export default function SettingsScreen() {
             </Text>
           )}
 
-          <View style={{ flexDirection: 'row', gap: S.sm }}>
+          <View style={{ flexDirection: 'row', gap: S.sm, marginBottom: S.sm }}>
             <View style={{ flex: 1 }}>
               <BrutalBtn label={testing ? 'TESTING...' : 'TEST KEY'} onPress={testApiKey} disabled={!apiKey.trim() || testing} outline />
             </View>
+          </View>
+
+          <View style={{ flexDirection: 'row', gap: S.sm }}>
+            <TouchableOpacity
+              onPress={() => Linking.openURL('https://aistudio.google.com/app/apikey')}
+              style={{
+                flex: 1, borderWidth: C.BORDER_W, borderColor: C.green,
+                backgroundColor: C.greenGhost,
+                padding: S.md, justifyContent: 'center', alignItems: 'center', minHeight: S.tapMin,
+              }}>
+              <Text style={{ fontFamily: FONT.mono, fontSize: 10, color: C.green, letterSpacing: 1, fontWeight: '900' }}>
+                GET FREE KEY ↗
+              </Text>
+            </TouchableOpacity>
             <TouchableOpacity
               onPress={() => Linking.openURL('https://console.anthropic.com/settings/keys')}
               style={{
-                borderWidth: C.BORDER_W, borderColor: C.border,
-                padding: S.md, justifyContent: 'center', minHeight: S.tapMin,
+                flex: 1, borderWidth: C.BORDER_W, borderColor: C.border,
+                padding: S.md, justifyContent: 'center', alignItems: 'center', minHeight: S.tapMin,
               }}>
               <Text style={{ fontFamily: FONT.mono, fontSize: 10, color: C.textSecondary, letterSpacing: 1 }}>
-                GET KEY ↗
+                GET CLAUDE KEY ↗
               </Text>
             </TouchableOpacity>
           </View>
