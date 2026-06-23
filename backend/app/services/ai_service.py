@@ -154,9 +154,41 @@ Respond ONLY with valid JSON, no markdown, no backticks:
 {{"subtasks":["<step 1>","<step 2>","<step 3>","<step 4>"]}}"""
 
 
+def _build_week_plan_prompt(payload: Dict[str, Any]) -> str:
+    tasks = payload["tasks"]
+    task_line_parts = []
+    for t in tasks:
+        due_suffix = f", due: {t['due_date']}" if t.get("due_date") else ""
+        task_line_parts.append(f"- [{t['task_id']}] {t['title']} — status: {t['status']}{due_suffix}")
+    task_lines = "\n".join(task_line_parts)
+
+    sprint_context = payload.get("sprint_context", "")
+    sprint_block = f"\n{sprint_context}\n" if sprint_context else ""
+
+    return f"""You are a senior robotics engineering lead doing a weekly sprint triage for the AUIV Simulator project.
+{sprint_block}
+WEEK {payload['week_num']}: {payload['week_title']}
+
+ALL TASKS THIS WEEK:
+{task_lines}
+
+Based on current status, due dates, and days remaining, decide:
+1. Which 2-4 tasks deserve focus TODAY (prioritize blocked/in-progress over untouched todo items if time is short; prioritize todo items that unblock others)
+2. Which tasks are realistically at risk of not finishing in time, and why
+3. Any sequencing/dependency advice (e.g. "do X before Y because Y depends on X's output")
+4. An honest one-paragraph summary of where this week actually stands
+
+Be direct about risk. If the sprint context shows a red-flag trigger condition, factor that into "at_risk" explicitly.
+
+Respond ONLY with valid JSON, no markdown, no backticks:
+{{"focus_today":["<task_id: short reason>","..."],"at_risk":["<task_id: why>","..."],"sequencing_note":"<one sentence>","week_outlook":"on_track"|"tight"|"at_risk","summary":"<one paragraph>"}}"""
+
+
 def _build_prompt(job_type: str, payload: Dict[str, Any]) -> str:
     if job_type == "evaluate":
         return _build_evaluate_prompt(payload)
+    if job_type == "week_plan":
+        return _build_week_plan_prompt(payload)
     return _build_subtask_prompt(payload)
 
 
@@ -375,7 +407,7 @@ async def attempt_evaluation(
     - Success → returns result dict, also patches log if log_id given
     - Timeout/error → creates a pending job, raises AIJobQueued
     """
-    if job_type == "evaluate" and ("sprint_context" not in payload):
+    if job_type in ("evaluate", "week_plan") and ("sprint_context" not in payload):
         payload = {
             **payload,
             "sprint_context": await _get_sprint_context(
@@ -384,7 +416,7 @@ async def attempt_evaluation(
         }
 
     prompt = _build_prompt(job_type, payload)
-    max_tokens = 800 if job_type == "evaluate" else 600
+    max_tokens = 800 if job_type == "evaluate" else (1000 if job_type == "week_plan" else 600)
     provider = detect_provider(api_key)
 
     try:
@@ -444,7 +476,7 @@ async def run_pending_retries():
         )
 
         prompt     = _build_prompt(job_type, payload)
-        max_tokens = 800 if job_type == "evaluate" else 600
+        max_tokens = 800 if job_type == "evaluate" else (1000 if job_type == "week_plan" else 600)
 
         try:
             result = await _call_llm(api_key, prompt, max_tokens)

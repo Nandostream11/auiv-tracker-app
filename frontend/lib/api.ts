@@ -141,3 +141,10 @@ export async function suggestSubtasks(body: {
 }) {
   return request<any>('POST', '/api/ai/suggest-subtasks', body);
 }
+
+export async function suggestWeekPlan(body: {
+  device_id: string; api_key: string; week_num: number; week_title: string;
+  tasks: { task_id: string; title: string; status: string; due_date?: string | null }[];
+}) {
+  return request<any>('POST', '/api/ai/suggest-week-plan', body);
+}

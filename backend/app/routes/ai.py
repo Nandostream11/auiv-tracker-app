@@ -25,7 +25,7 @@ import httpx
 
 from app.db import jobs_col
 from app.models.models import (
-    EvaluateRequest, SubtaskRequest,
+    EvaluateRequest, SubtaskRequest, WeekPlanRequest,
 )
 from app.services.ai_service import attempt_evaluation, AIJobQueued
 
@@ -209,6 +209,47 @@ async def suggest_subtasks(body: SubtaskRequest):
                 "next_retry_at": job["next_retry_at"] if job else None,
                 "retry_hours":   5,
                 "message":       "Claude unavailable. Subtask suggestions queued — will retry in 5 hours.",
+            },
+        )
+
+
+# ── Week plan ─────────────────────────────────────────────────────────────
+
+@router.post("/suggest-week-plan")
+async def suggest_week_plan(body: WeekPlanRequest):
+    """
+    AI triage for an entire sprint week — looks at every task's status
+    and due date, the week's red-flag scope-cut trigger (if any), and
+    days remaining, then returns what to focus on today, what's at risk,
+    and sequencing advice. Same immediate-attempt + 5h-retry-queue
+    pattern as /evaluate and /suggest-subtasks.
+    """
+    payload = {
+        "week_num":   body.week_num,
+        "week_title": body.week_title,
+        "tasks":      [t.model_dump() for t in body.tasks],
+    }
+
+    try:
+        result = await attempt_evaluation(
+            device_id=body.device_id,
+            log_id="",
+            api_key=body.api_key,
+            payload=payload,
+            job_type="week_plan",
+        )
+        return {"status": "completed", "result": result}
+
+    except AIJobQueued as jq:
+        job = await jobs_col().find_one({"_id": ObjectId(jq.job_id)})
+        return JSONResponse(
+            status_code=202,
+            content={
+                "status":        "pending",
+                "job_id":        jq.job_id,
+                "next_retry_at": job["next_retry_at"] if job else None,
+                "retry_hours":   5,
+                "message":       "AI unavailable. Week plan queued — will retry in 5 hours.",
             },
         )
 

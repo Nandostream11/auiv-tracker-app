@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   ScrollView, View, Text, TouchableOpacity,
   Modal, Alert, FlatList,
@@ -12,7 +12,7 @@ import {
   TimelineBadge,
 } from '../../components/ui';
 import { C, S, FONT } from '../../constants/theme';
-import { createTask, deleteTask, updateTask } from '../../lib/api';
+import { createTask, deleteTask, updateTask, suggestWeekPlan, getApiKey } from '../../lib/api';
 
 const WEEKS = [
   { num: 1, title: 'Infrastructure & Vehicle Model', hours: 12 },
@@ -35,12 +35,58 @@ export default function SprintScreen() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [form, setForm] = useState<TaskFormData>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const [planLoading, setPlanLoading] = useState(false);
+  const [weekPlan, setWeekPlan] = useState<any>(null);
+  const [planError, setPlanError] = useState('');
 
   const weekTasks = tasks
     .filter((t) => t.week_num === activeWeek)
     .sort((a, b) => a.task_id.localeCompare(b.task_id));
   const progress = getWeekProgress(tasks, activeWeek);
   const weekMeta = WEEKS[activeWeek - 1];
+
+  // Clear a stale plan when switching weeks so it never looks like it
+  // belongs to the wrong week
+  useEffect(() => {
+    setWeekPlan(null);
+    setPlanError('');
+  }, [activeWeek]);
+
+  async function handleSuggestWeekPlan() {
+    const apiKey = await getApiKey();
+    if (!apiKey) {
+      Alert.alert('NO API KEY', 'Add your AI API key in Settings to use week planning.');
+      return;
+    }
+    if (weekTasks.length === 0) {
+      Alert.alert('NO TASKS', 'Add at least one task to this week before requesting a plan.');
+      return;
+    }
+    setPlanLoading(true);
+    setPlanError('');
+    try {
+      const res = await suggestWeekPlan({
+        device_id: deviceId,
+        api_key: apiKey,
+        week_num: activeWeek,
+        week_title: weekMeta.title,
+        tasks: weekTasks.map((t) => ({
+          task_id: t.task_id, title: t.title, status: t.status,
+          due_date: t.due_date || null,
+        })),
+      });
+
+      if (res.status === 'pending') {
+        setPlanError(res.message || 'AI unavailable — queued, will retry in ~5 hours.');
+        return;
+      }
+
+      setWeekPlan(res.result);
+    } catch (e: any) {
+      setPlanError(e.message);
+    }
+    setPlanLoading(false);
+  }
 
   async function handleAddTask() {
     if (!form.task_id || !form.title || !form.done_criteria) {
@@ -147,10 +193,101 @@ export default function SprintScreen() {
             <TagPill label={`${weekMeta.hours}H`} color={C.amber} bg={C.amberGhost} />
           </View>
           <BrutalBar pct={progress.pct} color={progress.pct === 100 ? C.green : C.orange} height={4} />
-          <Text style={{ fontFamily: FONT.mono, fontSize: 10, color: C.textDim, marginTop: 4 }}>
+          <Text style={{ fontFamily: FONT.mono, fontSize: 10, color: C.textDim, marginTop: 4, marginBottom: S.sm }}>
             {progress.done} OF {progress.total} COMPLETE · {progress.pct}%
           </Text>
+
+          <TouchableOpacity
+            onPress={handleSuggestWeekPlan}
+            disabled={planLoading}
+            style={{
+              borderWidth: C.BORDER_W, borderColor: C.orange,
+              backgroundColor: C.orangeGhost,
+              paddingVertical: S.sm, alignItems: 'center', justifyContent: 'center',
+              flexDirection: 'row', gap: S.sm, minHeight: S.tapMin,
+              opacity: planLoading ? 0.5 : 1,
+            }}>
+            <Text style={{ fontFamily: FONT.mono, fontSize: 12, fontWeight: '900', color: C.orange, letterSpacing: 1 }}>
+              {planLoading ? '◈ THINKING...' : '◈ PLAN MY WEEK'}
+            </Text>
+          </TouchableOpacity>
         </View>
+
+        {/* Week plan error/pending state */}
+        {planError !== '' && (
+          <View style={{
+            borderWidth: C.BORDER_W, borderColor: C.amber, backgroundColor: C.amberGhost,
+            padding: S.md, marginBottom: S.sm,
+          }}>
+            <Text style={{ fontFamily: FONT.mono, fontSize: 11, color: C.amber, lineHeight: 17 }}>
+              {planError}
+            </Text>
+          </View>
+        )}
+
+        {/* Week plan result */}
+        {weekPlan && (
+          <View style={{
+            borderWidth: C.BORDER_W,
+            borderColor: weekPlan.week_outlook === 'at_risk' ? C.red : weekPlan.week_outlook === 'tight' ? C.amber : C.green,
+            backgroundColor: C.surface, marginBottom: S.sm,
+          }}>
+            <View style={{
+              padding: S.md, borderBottomWidth: 1, borderBottomColor: C.border,
+              flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+            }}>
+              <Text style={{ fontFamily: FONT.mono, fontSize: 10, color: C.orange, letterSpacing: 2 }}>
+                ◈ WEEK {activeWeek} PLAN
+              </Text>
+              <TagPill
+                label={weekPlan.week_outlook?.replace('_', ' ') || ''}
+                color={weekPlan.week_outlook === 'at_risk' ? C.red : weekPlan.week_outlook === 'tight' ? C.amber : C.green}
+                bg={weekPlan.week_outlook === 'at_risk' ? C.redGhost : weekPlan.week_outlook === 'tight' ? C.amberGhost : C.greenGhost}
+              />
+            </View>
+
+            <View style={{ padding: S.md }}>
+              <Text style={{ fontFamily: FONT.mono, fontSize: 12, color: C.textSecondary, lineHeight: 19, marginBottom: S.md }}>
+                {weekPlan.summary}
+              </Text>
+
+              {weekPlan.focus_today?.length > 0 && (
+                <View style={{ marginBottom: S.md }}>
+                  <SectionLabel color={C.green}>FOCUS TODAY</SectionLabel>
+                  {weekPlan.focus_today.map((item: string, i: number) => (
+                    <View key={i} style={{ flexDirection: 'row', gap: S.sm, marginBottom: 6, alignItems: 'flex-start' }}>
+                      <Text style={{ color: C.green, fontSize: 13 }}>▸</Text>
+                      <Text style={{ fontFamily: FONT.mono, fontSize: 12, color: C.textPrimary, flex: 1, lineHeight: 18 }}>{item}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {weekPlan.at_risk?.length > 0 && (
+                <View style={{ marginBottom: S.md }}>
+                  <SectionLabel color={C.red}>AT RISK</SectionLabel>
+                  {weekPlan.at_risk.map((item: string, i: number) => (
+                    <View key={i} style={{ flexDirection: 'row', gap: S.sm, marginBottom: 6, alignItems: 'flex-start' }}>
+                      <Text style={{ color: C.red, fontSize: 13 }}>⚠</Text>
+                      <Text style={{ fontFamily: FONT.mono, fontSize: 12, color: C.textSecondary, flex: 1, lineHeight: 18 }}>{item}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {weekPlan.sequencing_note && (
+                <View style={{ borderWidth: 1, borderColor: C.border, backgroundColor: C.surfaceHigh, padding: S.sm }}>
+                  <Text style={{ fontFamily: FONT.mono, fontSize: 9, color: C.textDim, letterSpacing: 1, marginBottom: 4 }}>
+                    SEQUENCING
+                  </Text>
+                  <Text style={{ fontFamily: FONT.mono, fontSize: 11, color: C.textSecondary, lineHeight: 17 }}>
+                    {weekPlan.sequencing_note}
+                  </Text>
+                </View>
+              )}
+            </View>
+          </View>
+        )}
 
         {/* Task List */}
         {weekTasks.map((task) => (

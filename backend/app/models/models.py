@@ -133,6 +133,29 @@ class SubtaskResponse(BaseModel):
     subtasks: List[str]
 
 
+class TaskSummary(BaseModel):
+    task_id: str
+    title: str
+    status: str
+    due_date: Optional[str] = None
+
+
+class WeekPlanRequest(BaseModel):
+    device_id: str
+    api_key: str
+    week_num: int
+    week_title: str
+    tasks: List[TaskSummary]
+
+
+class WeekPlanResponse(BaseModel):
+    focus_today: List[str]      # 2-4 task_ids/titles to prioritize right now
+    at_risk: List[str]          # tasks unlikely to finish in time, with why
+    sequencing_note: str        # one sentence on dependency/ordering advice
+    week_outlook: str           # "on_track" | "tight" | "at_risk"
+    summary: str                # one paragraph overview
+
+
 # ── AI Job (persistent retry queue) ──────────────────────────────────────
 class AIJobCreate(BaseModel):
     device_id: str
