@@ -143,6 +143,8 @@ async def evaluate_standup(body: EvaluateRequest):
         "next_action":    body.next_action or "",
         "tomorrow_task":  body.tomorrow_task or "",
         "previous_notes": body.previous_notes or "",
+        "week_num":       body.week_num,
+        "task_due_date":  body.task_due_date,
     }
 
     # log_id comes from the saved daily log — passed in device_id field here

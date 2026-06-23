@@ -246,6 +246,8 @@ export default function DailyScreen() {
           next_action:    nextAction,
           tomorrow_task:  tomorrow,
           previous_notes: currentTask?.notes || '',
+          week_num:       currentTask?.week_num,
+          task_due_date:  currentTask?.due_date || null,
         }),
       });
 

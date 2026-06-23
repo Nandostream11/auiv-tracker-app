@@ -21,8 +21,8 @@ from typing import Any, Dict, Optional
 import httpx
 from bson import ObjectId
 
-from app.db import jobs_col, logs_col
-from app.models.seed_data import CHECKLIST_ITEMS
+from app.db import jobs_col, logs_col, projects_col
+from app.models.seed_data import CHECKLIST_ITEMS, RED_FLAGS
 
 logger = logging.getLogger("ai_service")
 
@@ -55,14 +55,71 @@ def detect_provider(api_key: str) -> str:
 
 # ── Prompt builders ───────────────────────────────────────────────────────
 
+async def _get_sprint_context(device_id: str, week_num: Optional[int], task_due_date: Optional[str]) -> str:
+    """
+    Builds a short block of sprint-position context the AI eval can use to
+    give genuinely situational advice instead of generic encouragement —
+    e.g. "you have 2 days left in Week 3 and the red-flag trigger for
+    this week is X" instead of just "good progress, keep going."
+
+    Returns an empty string if project start date or week_num is unavailable,
+    so this degrades gracefully rather than failing the whole eval.
+    """
+    if not week_num:
+        return ""
+
+    proj = await projects_col().find_one({"device_id": device_id})
+    if not proj or not proj.get("created_at"):
+        return ""
+
+    try:
+        project_start = datetime.fromisoformat(proj["created_at"])
+    except Exception:
+        return ""
+
+    now = datetime.now(timezone.utc)
+    week_end = project_start + timedelta(weeks=week_num)
+    days_left_in_week = max(0, (week_end - now).days)
+    total_sprint_days_left = max(0, (project_start + timedelta(weeks=6) - now).days)
+
+    lines = [
+        f"SPRINT POSITION: Week {week_num} of 6. {days_left_in_week} day(s) left in this week, "
+        f"{total_sprint_days_left} day(s) left in the entire 6-week sprint.",
+    ]
+
+    red_flag = next((rf for rf in RED_FLAGS if rf["week"] == week_num), None)
+    if red_flag:
+        lines.append(
+            f"RED-FLAG TRIGGER FOR THIS WEEK: {red_flag['text']}. "
+            f"If the engineer's standup suggests this condition is being hit, "
+            f"flag it explicitly as the top_concern and recommend the stated scope cut."
+        )
+
+    if task_due_date:
+        try:
+            due = datetime.fromisoformat(task_due_date).replace(tzinfo=timezone.utc)
+            days_overdue = (now - due).days
+            if days_overdue > 0:
+                lines.append(f"THIS TASK IS {days_overdue} DAY(S) OVERDUE (due {task_due_date}).")
+            elif days_overdue == 0:
+                lines.append("THIS TASK IS DUE TODAY.")
+        except Exception:
+            pass
+
+    return "\n".join(lines)
+
+
 def _build_evaluate_prompt(payload: Dict[str, Any]) -> str:
     check_labels = {item["id"]: item["label"] for item in CHECKLIST_ITEMS}
     check_summary = "\n".join(
         f"{'✓' if payload['checks'].get(cid) else '✗'} {label}"
         for cid, label in check_labels.items()
     )
-    return f"""You are a senior robotics engineering lead reviewing a daily standup for the AUIV Simulator project.
+    sprint_context = payload.get("sprint_context", "")
+    sprint_block = f"\n{sprint_context}\n" if sprint_context else ""
 
+    return f"""You are a senior robotics engineering lead reviewing a daily standup for the AUIV Simulator project.
+{sprint_block}
 TASK: {payload['task_title']}
 DONE CRITERIA: {payload['done_criteria']}
 PREVIOUS NOTES: {payload.get('previous_notes') or 'None'}
@@ -73,6 +130,11 @@ ENGINEER CHECKLIST:
 BLOCKING ISSUE: {payload.get('blocker') or 'None stated'}
 NEXT ACTION: {payload.get('next_action') or 'None stated'}
 TOMORROW FIRST TASK: {payload.get('tomorrow_task') or 'None stated'}
+
+If sprint position context above shows few days remaining in the week or
+sprint, or shows a red-flag trigger condition being hit, or shows this
+task is overdue, weight that heavily in top_concern and momentum —
+deadline pressure should not be buried under generic encouragement.
 
 Respond ONLY with valid JSON, no markdown, no backticks:
 {{"completion_pct":<0-100 int>,"momentum":"strong"|"ok"|"at_risk","remaining":["<2-4 short strings>"],"blocker_assessment":"clear"|"vague"|"none","top_concern":"<one sentence>","green_signals":["<1-3 things going well>"]}}"""
@@ -313,6 +375,14 @@ async def attempt_evaluation(
     - Success → returns result dict, also patches log if log_id given
     - Timeout/error → creates a pending job, raises AIJobQueued
     """
+    if job_type == "evaluate" and ("sprint_context" not in payload):
+        payload = {
+            **payload,
+            "sprint_context": await _get_sprint_context(
+                device_id, payload.get("week_num"), payload.get("task_due_date")
+            ),
+        }
+
     prompt = _build_prompt(job_type, payload)
     max_tokens = 800 if job_type == "evaluate" else 600
     provider = detect_provider(api_key)

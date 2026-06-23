@@ -106,6 +106,8 @@ class EvaluateRequest(BaseModel):
     next_action: Optional[str] = ""
     tomorrow_task: Optional[str] = ""
     previous_notes: Optional[str] = ""
+    week_num: Optional[int] = None      # which sprint week this task belongs to
+    task_due_date: Optional[str] = None # ISO date — lets the AI flag overdue tasks
 
 
 class EvaluateResponse(BaseModel):

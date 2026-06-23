@@ -130,7 +130,7 @@ export async function evaluateStandup(body: {
   device_id: string; api_key: string; task_title: string;
   done_criteria: string; checks: Record<string, boolean>;
   blocker?: string; next_action?: string; tomorrow_task?: string;
-  previous_notes?: string;
+  previous_notes?: string; week_num?: number; task_due_date?: string;
 }) {
   return request<any>('POST', '/api/ai/evaluate', body);
 }
