@@ -164,6 +164,10 @@ async def evaluate_standup(body: EvaluateRequest):
     except AIJobQueued as jq:
         # Fetch the created job for response metadata
         job = await jobs_col().find_one({"_id": ObjectId(jq.job_id)})
+        from app.services.ai_service import detect_provider
+        provider_label = {"gemini": "Gemini", "openrouter": "OpenRouter", "anthropic": "Claude"}.get(
+            detect_provider(body.api_key), "AI provider"
+        )
         return JSONResponse(
             status_code=202,
             content={
@@ -171,7 +175,7 @@ async def evaluate_standup(body: EvaluateRequest):
                 "job_id":        jq.job_id,
                 "next_retry_at": job["next_retry_at"] if job else None,
                 "retry_hours":   5,
-                "message":       f"Claude unavailable ({jq.reason}). Eval queued — will retry in 5 hours.",
+                "message":       f"{provider_label} unavailable ({jq.reason}). Eval queued — will retry in 5 hours.",
             },
         )
 
@@ -201,6 +205,10 @@ async def suggest_subtasks(body: SubtaskRequest):
 
     except AIJobQueued as jq:
         job = await jobs_col().find_one({"_id": ObjectId(jq.job_id)})
+        from app.services.ai_service import detect_provider
+        provider_label = {"gemini": "Gemini", "openrouter": "OpenRouter", "anthropic": "Claude"}.get(
+            detect_provider(body.api_key), "AI provider"
+        )
         return JSONResponse(
             status_code=202,
             content={
@@ -208,7 +216,7 @@ async def suggest_subtasks(body: SubtaskRequest):
                 "job_id":        jq.job_id,
                 "next_retry_at": job["next_retry_at"] if job else None,
                 "retry_hours":   5,
-                "message":       "Claude unavailable. Subtask suggestions queued — will retry in 5 hours.",
+                "message":       f"{provider_label} unavailable ({jq.reason}). Subtask suggestions queued — will retry in 5 hours.",
             },
         )
 

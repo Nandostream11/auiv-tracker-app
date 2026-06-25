@@ -48,7 +48,7 @@ function PendingJobBanner({ job }: { job: AIJob }) {
           AI EVAL QUEUED
         </Text>
         <Text style={{ fontFamily: FONT.mono, fontSize: 11, color: C.textSecondary, marginTop: 2, lineHeight: 18 }}>
-          Claude didn't respond in time. Your standup is saved.{'\n'}
+          AI provider didn't respond in time. Your standup is saved.{'\n'}
           Backend will retry in {timeLabel} · Attempt {job.retryCount + 1}/5
         </Text>
         {job.error && (

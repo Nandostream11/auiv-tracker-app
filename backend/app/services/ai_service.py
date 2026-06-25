@@ -266,11 +266,18 @@ async def _call_openrouter(api_key: str, prompt: str, max_tokens: int = 800) -> 
     """
     Call OpenRouter (free tier, openrouter.ai).
     OpenAI-compatible schema: standard Bearer auth, response in
-    choices[0].message.content. Uses response_format json_object to
-    request valid JSON output directly, same pattern as Gemini.
-    Uses the 'openrouter/free' auto-router so it always resolves to
-    *some* currently-available free model rather than a specific slug
-    that might get deprecated or rate-limited.
+    choices[0].message.content.
+
+    Deliberately does NOT set response_format=json_object. OpenRouter's
+    own docs state the free router "filters for models that support
+    features needed for your request such as ... structured outputs" —
+    meaning that constraint actively SHRINKS the pool of available free
+    models at request time, which on a free tier with limited capacity
+    is more likely to cause failures than prevent them. Our prompts
+    already instruct "Respond ONLY with valid JSON" as plain text, which
+    is the same mechanism we rely on for Claude (which has no native
+    JSON-mode constraint applied either) — so we lose nothing in JSON
+    reliability while gaining access to the full free model pool.
     """
     headers = {
         "Content-Type": "application/json",
@@ -280,7 +287,6 @@ async def _call_openrouter(api_key: str, prompt: str, max_tokens: int = 800) -> 
         "model": OPENROUTER_MODEL,
         "max_tokens": max_tokens,
         "messages": [{"role": "user", "content": prompt}],
-        "response_format": {"type": "json_object"},
     }
     async with httpx.AsyncClient(timeout=TIMEOUT_S) as client:
         resp = await client.post(OPENROUTER_URL, headers=headers, json=body)
