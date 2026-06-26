@@ -9,15 +9,6 @@ import {
 } from '../../components/ui';
 import { C, S, FONT } from '../../constants/theme';
 
-const WEEKS = [
-  { num: 1, title: 'Infrastructure & Vehicle Model' },
-  { num: 2, title: 'Sensor Plugin Integration' },
-  { num: 3, title: 'EKF Localization' },
-  { num: 4, title: 'Autonomy Tree & Mission Logic' },
-  { num: 5, title: 'Integration & Ground-Truth Harness' },
-  { num: 6, title: 'Final Demo, CI Validation, Docs' },
-];
-
 const RED_FLAGS = [
   { week: 2, text: 'All 4 sensor topics not publishing → Drop sonar' },
   { week: 3, text: 'EKF not at 50 Hz → Hand-rolled 9-state Python EKF' },
@@ -27,7 +18,7 @@ const RED_FLAGS = [
 
 export default function OverviewScreen() {
   const router = useRouter();
-  const { tasks, logs, setActiveWeek } = useStore();
+  const { tasks, logs, weeks, setActiveWeek } = useStore();
 
   const total = tasks.length;
   const done = tasks.filter((t) => t.status === 'done').length;
@@ -133,11 +124,11 @@ export default function OverviewScreen() {
         {/* Sprint progress */}
         <BrutalBox style={{ padding: S.md }}>
           <SectionLabel>SPRINT PROGRESS</SectionLabel>
-          {WEEKS.map((w) => {
+          {weeks.map((w) => {
             const p = getWeekProgress(tasks, w.num);
             return (
               <TouchableOpacity
-                key={w.num}
+                key={w.id}
                 onPress={() => { setActiveWeek(w.num); router.push('/(tabs)/sprint'); }}
                 style={{ marginBottom: S.md }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>

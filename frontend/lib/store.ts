@@ -39,11 +39,25 @@ export interface DailyLog {
   updated_at: string;
 }
 
+export interface Week {
+  id: string;
+  device_id: string;
+  num: number;
+  title: string;
+  hours: number;
+  start_date?: string | null;
+  due_date?: string | null;
+  is_custom: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AppState {
   deviceId: string;
   initialized: boolean;
   tasks: Task[];
   logs: DailyLog[];
+  weeks: Week[];
   activeWeek: number;
   charter: any | null;
   checklistItems: any[];
@@ -52,12 +66,15 @@ export interface AppState {
   setInitialized: (v: boolean) => void;
   setTasks: (tasks: Task[]) => void;
   setLogs: (logs: DailyLog[]) => void;
+  setWeeks: (weeks: Week[]) => void;
   setActiveWeek: (w: number) => void;
   setCharter: (c: any) => void;
   setChecklistItems: (items: any[]) => void;
   upsertTask: (task: Task) => void;
   upsertLog: (log: DailyLog) => void;
   removeTask: (id: string) => void;
+  upsertWeek: (week: Week) => void;
+  removeWeek: (id: string) => void;
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -68,11 +85,13 @@ export const useStore = create<AppState>((set) => ({
   activeWeek:    1,
   charter:       null,
   checklistItems: [],
+  weeks:         [],
 
   setDeviceId:       (id)    => set({ deviceId: id }),
   setInitialized:    (v)     => set({ initialized: v }),
   setTasks:          (tasks) => set({ tasks }),
   setLogs:           (logs)  => set({ logs }),
+  setWeeks:          (weeks) => set({ weeks }),
   setActiveWeek:     (w)     => set({ activeWeek: w }),
   setCharter:        (c)     => set({ charter: c }),
   setChecklistItems: (items) => set({ checklistItems: items }),
@@ -99,6 +118,20 @@ export const useStore = create<AppState>((set) => ({
 
   removeTask: (id) => set((s) => ({
     tasks: s.tasks.filter((t) => t.id !== id),
+  })),
+
+  upsertWeek: (week) => set((s) => {
+    const idx = s.weeks.findIndex((w) => w.id === week.id);
+    if (idx >= 0) {
+      const updated = [...s.weeks];
+      updated[idx] = week;
+      return { weeks: updated };
+    }
+    return { weeks: [...s.weeks, week].sort((a, b) => a.num - b.num) };
+  }),
+
+  removeWeek: (id) => set((s) => ({
+    weeks: s.weeks.filter((w) => w.id !== id),
   })),
 }));
 

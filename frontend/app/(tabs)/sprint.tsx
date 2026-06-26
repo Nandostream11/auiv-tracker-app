@@ -12,16 +12,7 @@ import {
   TimelineBadge,
 } from '../../components/ui';
 import { C, S, FONT } from '../../constants/theme';
-import { createTask, deleteTask, updateTask, suggestWeekPlan, getApiKey } from '../../lib/api';
-
-const WEEKS = [
-  { num: 1, title: 'Infrastructure & Vehicle Model', hours: 12 },
-  { num: 2, title: 'Sensor Plugin Integration',      hours: 13 },
-  { num: 3, title: 'EKF Localization',               hours: 13 },
-  { num: 4, title: 'Autonomy Tree & Mission Logic',  hours: 12 },
-  { num: 5, title: 'Integration & Ground-Truth',     hours: 13 },
-  { num: 6, title: 'Final Demo, CI & Docs',          hours: 12 },
-];
+import { createTask, deleteTask, updateTask, suggestWeekPlan, getApiKey, createWeek, deleteWeek } from '../../lib/api';
 
 interface TaskFormData {
   task_id: string; title: string; detail: string; done_criteria: string;
@@ -31,7 +22,7 @@ const EMPTY_FORM: TaskFormData = { task_id: '', title: '', detail: '', done_crit
 
 export default function SprintScreen() {
   const router = useRouter();
-  const { tasks, activeWeek, setActiveWeek, deviceId, upsertTask, removeTask } = useStore();
+  const { tasks, weeks, activeWeek, setActiveWeek, deviceId, upsertTask, removeTask, upsertWeek, removeWeek } = useStore();
   const [showAddModal, setShowAddModal] = useState(false);
   const [form, setForm] = useState<TaskFormData>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
@@ -43,7 +34,7 @@ export default function SprintScreen() {
     .filter((t) => t.week_num === activeWeek)
     .sort((a, b) => a.task_id.localeCompare(b.task_id));
   const progress = getWeekProgress(tasks, activeWeek);
-  const weekMeta = WEEKS[activeWeek - 1];
+  const weekMeta = weeks.find((w) => w.num === activeWeek) || { num: activeWeek, title: 'Untitled Week', hours: 0 };
 
   // Clear a stale plan when switching weeks so it never looks like it
   // belongs to the wrong week
@@ -51,6 +42,49 @@ export default function SprintScreen() {
     setWeekPlan(null);
     setPlanError('');
   }, [activeWeek]);
+
+  async function handleAddWeek() {
+    const nextNum = weeks.length > 0 ? Math.max(...weeks.map((w) => w.num)) + 1 : 1;
+    try {
+      const week = await createWeek({
+        device_id: deviceId,
+        title: `Week ${nextNum}`,
+      });
+      upsertWeek(week);
+      setActiveWeek(week.num);
+      Alert.alert('WEEK ADDED', `Week ${week.num} created. Tap its title to rename it.`);
+    } catch (e: any) {
+      Alert.alert('ERROR', e.message);
+    }
+  }
+
+  async function handleDeleteWeek() {
+    const week = weeks.find((w) => w.num === activeWeek);
+    if (!week) return;
+
+    Alert.alert(
+      'DELETE WEEK',
+      `Delete Week ${week.num} (${week.title})? This cannot be undone.`,
+      [
+        { text: 'CANCEL', style: 'cancel' },
+        {
+          text: 'DELETE', style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteWeek(week.id);
+              removeWeek(week.id);
+              const remaining = weeks.filter((w) => w.id !== week.id);
+              if (remaining.length > 0) {
+                setActiveWeek(remaining[0].num);
+              }
+            } catch (e: any) {
+              Alert.alert('CANNOT DELETE', e.message);
+            }
+          },
+        },
+      ]
+    );
+  }
 
   async function handleSuggestWeekPlan() {
     const apiKey = await getApiKey();
@@ -142,12 +176,12 @@ export default function SprintScreen() {
         showsHorizontalScrollIndicator={false}
         style={{ borderBottomWidth: 1, borderBottomColor: C.border, maxHeight: 64 }}
         contentContainerStyle={{ paddingHorizontal: S.md, paddingVertical: S.sm, gap: S.xs }}>
-        {WEEKS.map((w) => {
+        {weeks.map((w) => {
           const p = getWeekProgress(tasks, w.num);
           const active = w.num === activeWeek;
           return (
             <TouchableOpacity
-              key={w.num}
+              key={w.id}
               onPress={() => setActiveWeek(w.num)}
               style={{
                 borderWidth: C.BORDER_W,
@@ -169,6 +203,19 @@ export default function SprintScreen() {
             </TouchableOpacity>
           );
         })}
+
+        {/* Add a new sprint week */}
+        <TouchableOpacity
+          onPress={handleAddWeek}
+          style={{
+            borderWidth: C.BORDER_W, borderColor: C.border, borderStyle: 'dashed',
+            paddingHorizontal: S.md, paddingVertical: S.sm,
+            alignItems: 'center', justifyContent: 'center',
+            minWidth: 56, minHeight: 48,
+          }}>
+          <Text style={{ fontFamily: FONT.mono, fontSize: 18, color: C.textDim, fontWeight: '900' }}>+</Text>
+          <Text style={{ fontFamily: FONT.mono, fontSize: 8, color: C.textDim, marginTop: 1 }}>ADD</Text>
+        </TouchableOpacity>
       </ScrollView>
 
       <ScrollView
@@ -192,6 +239,15 @@ export default function SprintScreen() {
             </View>
             <TagPill label={`${weekMeta.hours}H`} color={C.amber} bg={C.amberGhost} />
           </View>
+          {(weeks.find((w) => w.num === activeWeek)?.is_custom) && (
+            <TouchableOpacity
+              onPress={handleDeleteWeek}
+              style={{ alignSelf: 'flex-start', marginBottom: S.sm, padding: 4 }}>
+              <Text style={{ fontFamily: FONT.mono, fontSize: 10, color: C.textDim, letterSpacing: 1 }}>
+                ✕ DELETE THIS WEEK
+              </Text>
+            </TouchableOpacity>
+          )}
           <BrutalBar pct={progress.pct} color={progress.pct === 100 ? C.green : C.orange} height={4} />
           <Text style={{ fontFamily: FONT.mono, fontSize: 10, color: C.textDim, marginTop: 4, marginBottom: S.sm }}>
             {progress.done} OF {progress.total} COMPLETE · {progress.pct}%

@@ -3,7 +3,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { View, Text, Animated } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { getDeviceId, initProject, getAllTasks, getAllLogs } from '../lib/api';
+import { getDeviceId, initProject, getAllTasks, getAllLogs, getAllWeeks } from '../lib/api';
 import { useStore } from '../lib/store';
 import { useJobStore } from '../lib/jobStore';
 import { useAIJobPoller } from '../hooks/useAIJobPoller';
@@ -41,7 +41,7 @@ function EvalToast({ date, visible }: { date: string; visible: boolean }) {
 }
 
 function AppBootstrap({ children }: { children: React.ReactNode }) {
-  const { setDeviceId, setTasks, setLogs, setCharter, setChecklistItems, setInitialized } = useStore();
+  const { setDeviceId, setTasks, setLogs, setWeeks, setCharter, setChecklistItems, setInitialized } = useStore();
   const { hydrateFromStorage } = useJobStore();
   const [toastDate, setToastDate]       = useState('');
   const [toastVisible, setToastVisible] = useState(false);
@@ -55,9 +55,10 @@ function AppBootstrap({ children }: { children: React.ReactNode }) {
         const init = await initProject(id);
         setCharter(init.charter);
         setChecklistItems(init.checklist_items || []);
-        const [tasks, logs] = await Promise.all([getAllTasks(id), getAllLogs(id)]);
+        const [tasks, logs, weeks] = await Promise.all([getAllTasks(id), getAllLogs(id), getAllWeeks(id)]);
         setTasks(tasks);
         setLogs(logs);
+        setWeeks(weeks);
         setInitialized(true);
       } catch (err) {
         console.error('[boot] Backend unreachable:', err);

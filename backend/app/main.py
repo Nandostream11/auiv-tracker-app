@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.db import connect_db, close_db
-from app.routes import project, tasks, daily_logs, ai
+from app.routes import project, tasks, daily_logs, ai, weeks
 from app.services.ai_service import run_pending_retries
 
 logging.basicConfig(level=logging.INFO)
@@ -59,6 +59,7 @@ app.include_router(project.router)
 app.include_router(tasks.router)
 app.include_router(daily_logs.router)
 app.include_router(ai.router)
+app.include_router(weeks.router)
 
 
 @app.get("/health")

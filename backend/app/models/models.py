@@ -189,3 +189,32 @@ class TestKeyRequest(BaseModel):
 class TestKeyResponse(BaseModel):
     valid: bool
     message: str
+
+
+# ── Weeks (user-extensible sprint structure) ──────────────────────────────
+class WeekCreate(BaseModel):
+    device_id: str
+    title: str
+    hours: Optional[int] = 0
+    start_date: Optional[str] = None
+    due_date: Optional[str] = None
+
+
+class WeekUpdate(BaseModel):
+    title: Optional[str] = None
+    hours: Optional[int] = None
+    start_date: Optional[str] = None
+    due_date: Optional[str] = None
+
+
+class WeekResponse(BaseModel):
+    id: str
+    device_id: str
+    num: int
+    title: str
+    hours: int
+    start_date: Optional[str] = None
+    due_date: Optional[str] = None
+    is_custom: bool
+    created_at: str
+    updated_at: str

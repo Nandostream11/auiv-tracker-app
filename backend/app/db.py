@@ -30,3 +30,4 @@ def projects_col():  return get_db()["projects"]
 def tasks_col():     return get_db()["tasks"]
 def logs_col():      return get_db()["daily_logs"]
 def jobs_col():      return get_db()["ai_jobs"]        # NEW
+def weeks_col():     return get_db()["weeks"]           # NEW — user-extensible sprint weeks
