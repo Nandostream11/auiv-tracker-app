@@ -1,11 +1,17 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { ScrollView, View, Text, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useStore, getWeekProgress, calcStreak, calcBestStreak, todayKey } from '../../lib/store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  useStore, getWeekProgress, calcStreak, calcBestStreak, todayKey,
+  getFocusTasks, getBurndownData, getBurndownStatus, calcXP, getLevelInfo,
+  STREAK_MILESTONES,
+} from '../../lib/store';
 import {
   BrutalBox, MetricBlock, BrutalBar, SectionLabel,
   Mono, TagPill, Divider, StreakCalendar,
+  FocusTaskCard, BurndownChart, LevelBadge, MilestoneBanner, EmptyState,
 } from '../../components/ui';
 import { C, S, FONT } from '../../constants/theme';
 
@@ -16,9 +22,27 @@ const RED_FLAGS = [
   { week: 5, text: 'Run 1 RMS > 2.0 m → Fix DVL noise model first' },
 ];
 
+const DISMISSED_MILESTONES_KEY = 'auiv_dismissed_milestones';
+
 export default function OverviewScreen() {
   const router = useRouter();
   const { tasks, logs, weeks, setActiveWeek } = useStore();
+
+  const [dismissedMilestones, setDismissedMilestones] = useState<number[]>([]);
+
+  useEffect(() => {
+    AsyncStorage.getItem(DISMISSED_MILESTONES_KEY).then((raw) => {
+      if (raw) {
+        try { setDismissedMilestones(JSON.parse(raw)); } catch {}
+      }
+    });
+  }, []);
+
+  async function dismissMilestone(m: number) {
+    const next = [...dismissedMilestones, m];
+    setDismissedMilestones(next);
+    await AsyncStorage.setItem(DISMISSED_MILESTONES_KEY, JSON.stringify(next));
+  }
 
   const total = tasks.length;
   const done = tasks.filter((t) => t.status === 'done').length;
@@ -31,12 +55,53 @@ export default function OverviewScreen() {
   const todayDone = logs.some((l) => l.date === todayKey());
   const recentLogs = [...logs].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 4);
 
+  const focusTasks = getFocusTasks(tasks);
+  const burndownPoints = getBurndownData(tasks, weeks);
+  const burndownStatus = getBurndownStatus(burndownPoints);
+  const xp = calcXP(tasks, logs);
+  const levelInfo = getLevelInfo(xp);
+
+  const reachedMilestone = STREAK_MILESTONES.find(
+    (m) => m === streak && !dismissedMilestones.includes(m)
+  );
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }} edges={['bottom']}>
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ padding: S.md, paddingBottom: 100 }}
         showsVerticalScrollIndicator={false}>
+
+        {/* Milestone celebration — only ever a positive event, never a penalty */}
+        {reachedMilestone && (
+          <MilestoneBanner streak={reachedMilestone} onDismiss={() => dismissMilestone(reachedMilestone)} />
+        )}
+
+        {/* Focus Today — the single most important addition: tells you what
+            to actually do right now, not just where things stand */}
+        <BrutalBox style={{ padding: S.md, borderColor: C.orange }}>
+          <SectionLabel color={C.orange}>◉ FOCUS TODAY</SectionLabel>
+          {focusTasks.length === 0 ? (
+            <View style={{ paddingVertical: S.md, alignItems: 'center' }}>
+              <Text style={{ fontFamily: FONT.mono, fontSize: 11, color: C.textDim, textAlign: 'center', lineHeight: 18 }}>
+                {total === 0 ? 'No tasks yet — add some in Sprint.' : 'Nothing urgent. Pick anything in Sprint to keep moving.'}
+              </Text>
+            </View>
+          ) : (
+            focusTasks.map((t) => (
+              <FocusTaskCard
+                key={t.id}
+                task={t}
+                onPress={() => router.push(`/task/${t.id}`)}
+              />
+            ))
+          )}
+        </BrutalBox>
+
+        {/* Level / XP — reward-only progression */}
+        <View style={{ marginBottom: S.sm }}>
+          <LevelBadge levelInfo={levelInfo} />
+        </View>
 
         {/* Mission Banner */}
         <View style={{
@@ -119,6 +184,21 @@ export default function OverviewScreen() {
             </View>
             <Text style={{ color: C.amber, fontSize: 20 }}>→</Text>
           </TouchableOpacity>
+        )}
+
+        {/* Sprint Burndown — the defining feature of every serious sprint tool */}
+        {burndownPoints.length > 0 && (
+          <BrutalBox style={{ padding: S.md }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: S.md }}>
+              <SectionLabel>SPRINT BURNDOWN</SectionLabel>
+              <TagPill
+                label={burndownStatus.label}
+                color={burndownStatus.color === 'green' ? C.green : burndownStatus.color === 'red' ? C.red : C.amber}
+                bg={burndownStatus.color === 'green' ? C.greenGhost : burndownStatus.color === 'red' ? C.redGhost : C.amberGhost}
+              />
+            </View>
+            <BurndownChart points={burndownPoints} />
+          </BrutalBox>
         )}
 
         {/* Sprint progress */}

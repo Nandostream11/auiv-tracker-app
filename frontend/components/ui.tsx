@@ -583,3 +583,147 @@ export function EvalStatusDetail({ log }: { log: any }) {
 
   return null;
 }
+
+// ── FocusTaskCard ──────────────────────────────────────────────────────────
+// Single row in the "Focus Today" list — Things 3 / Sunsama pattern of
+// surfacing a short, ranked, always-available "what to actually do right
+// now" list rather than just a stats dashboard.
+export function FocusTaskCard({
+  task, onPress,
+}: { task: any; onPress: () => void }) {
+  const urgent = task.focusReason?.toLowerCase().includes('overdue') || task.status === 'blocked';
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.7}
+      style={{
+        flexDirection: 'row', alignItems: 'center', gap: S.sm,
+        paddingVertical: S.sm, borderBottomWidth: 1, borderBottomColor: C.border,
+        minHeight: S.tapMin,
+      }}>
+      <View style={{
+        width: 8, height: 8, borderRadius: 4, flexShrink: 0,
+        backgroundColor: urgent ? C.red : C.orange,
+      }} />
+      <View style={{ flex: 1 }}>
+        <Text style={{ fontFamily: FONT.mono, fontSize: 13, color: C.textPrimary, fontWeight: '700' }} numberOfLines={1}>
+          {task.task_id} · {task.title}
+        </Text>
+        <Text style={{ fontFamily: FONT.mono, fontSize: 10, color: urgent ? C.red : C.textDim, marginTop: 2 }}>
+          {task.focusReason}
+        </Text>
+      </View>
+      <Text style={{ fontSize: 16, color: C.textDim }}>›</Text>
+    </TouchableOpacity>
+  );
+}
+
+// ── BurndownChart ──────────────────────────────────────────────────────────
+// The single most distinguishing feature of sprint-tracking tools
+// (Linear/Jira/Plane all build around this). Drawn with plain Views —
+// deliberately no charting library, to avoid any native-module build risk.
+// One row per week: two stacked horizontal bars (ideal vs actual remaining
+// work), so the gap between them is the at-a-glance "are we behind" signal.
+export function BurndownChart({ points }: { points: any[] }) {
+  if (!points || points.length === 0) return null;
+
+  return (
+    <View>
+      {points.map((p) => {
+        const behind = p.actualRemainingPct > p.idealRemainingPct;
+        const barColor = p.isFuture ? C.border : (behind ? C.red : C.green);
+        return (
+          <View key={p.weekNum} style={{ marginBottom: S.md, opacity: p.isFuture ? 0.4 : 1 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+              <Text style={{ fontFamily: FONT.mono, fontSize: 11, color: C.textPrimary, fontWeight: '700' }}>
+                W{p.weekNum} {p.isFuture ? '(upcoming)' : ''}
+              </Text>
+              <Text style={{ fontFamily: FONT.mono, fontSize: 10, color: C.textDim }}>
+                {p.actualRemaining} left · ideal {p.idealRemaining}
+              </Text>
+            </View>
+            <View style={{ height: 4, backgroundColor: C.border, marginBottom: 3 }}>
+              <View style={{ width: `${p.idealRemainingPct}%`, height: 4, backgroundColor: C.textDim }} />
+            </View>
+            <View style={{ height: 8, backgroundColor: C.border }}>
+              <View style={{ width: `${p.actualRemainingPct}%`, height: 8, backgroundColor: barColor }} />
+            </View>
+          </View>
+        );
+      })}
+      <View style={{ flexDirection: 'row', gap: S.md, marginTop: S.xs }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+          <View style={{ width: 10, height: 3, backgroundColor: C.textDim }} />
+          <Text style={{ fontFamily: FONT.mono, fontSize: 9, color: C.textDim }}>IDEAL PACE</Text>
+        </View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+          <View style={{ width: 10, height: 5, backgroundColor: C.green }} />
+          <Text style={{ fontFamily: FONT.mono, fontSize: 9, color: C.textDim }}>ON TRACK</Text>
+        </View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+          <View style={{ width: 10, height: 5, backgroundColor: C.red }} />
+          <Text style={{ fontFamily: FONT.mono, fontSize: 9, color: C.textDim }}>BEHIND</Text>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+// ── LevelBadge ─────────────────────────────────────────────────────────────
+// Reward-only progression display (deliberately no penalty mechanic — see
+// store.ts calcXP comment for the research rationale). Shows level, title,
+// and a progress bar toward the next level.
+export function LevelBadge({ levelInfo }: { levelInfo: any }) {
+  return (
+    <View style={{
+      borderWidth: C.BORDER_W, borderColor: C.purple, backgroundColor: C.purpleGhost,
+      padding: S.md,
+    }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: S.sm }}>
+        <View>
+          <Text style={{ fontFamily: FONT.mono, fontSize: 9, color: C.purple, letterSpacing: 2, textTransform: 'uppercase' }}>
+            LEVEL {levelInfo.level}
+          </Text>
+          <Text style={{ fontFamily: FONT.mono, fontSize: 16, fontWeight: '900', color: C.textPrimary, marginTop: 2 }}>
+            {levelInfo.title}
+          </Text>
+        </View>
+        <Text style={{ fontFamily: FONT.mono, fontSize: 11, color: C.purple, fontWeight: '700' }}>
+          {levelInfo.xp} XP
+        </Text>
+      </View>
+      <BrutalBar pct={levelInfo.progressPct} color={C.purple} height={5} />
+      <Text style={{ fontFamily: FONT.mono, fontSize: 9, color: C.textDim, marginTop: 4 }}>
+        {levelInfo.xpIntoLevel}/{levelInfo.xpForThisLevel} XP to next level
+      </Text>
+    </View>
+  );
+}
+
+// ── MilestoneBanner ────────────────────────────────────────────────────────
+// Dismissible celebration banner, shown once per milestone reached.
+// Reward-only design: this only ever fires on a positive event (hitting
+// a streak milestone), never on a negative one.
+export function MilestoneBanner({
+  streak, onDismiss,
+}: { streak: number; onDismiss: () => void }) {
+  return (
+    <View style={{
+      borderWidth: C.BORDER_W, borderColor: C.amber, backgroundColor: C.amberGhost,
+      padding: S.md, marginBottom: S.sm,
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    }}>
+      <View style={{ flex: 1 }}>
+        <Text style={{ fontFamily: FONT.mono, fontSize: 13, fontWeight: '900', color: C.amber }}>
+          🔥 {streak}-DAY STREAK
+        </Text>
+        <Text style={{ fontFamily: FONT.mono, fontSize: 10, color: C.textSecondary, marginTop: 2 }}>
+          {streak} days of standups logged in a row. Keep it going.
+        </Text>
+      </View>
+      <TouchableOpacity onPress={onDismiss} style={{ padding: S.sm }}>
+        <Text style={{ color: C.textDim, fontSize: 16 }}>✕</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}

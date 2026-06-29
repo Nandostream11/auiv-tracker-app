@@ -27,6 +27,8 @@ export const C = {
   amber:        '#FFB800',
   amberGhost:   '#FFB80018',
   blue:         '#0094FF',
+  purple:       '#9D6BFF',
+  purpleGhost:  '#9D6BFF18',
 
   // Borders
   BORDER_W:     1.5,
