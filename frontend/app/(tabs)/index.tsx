@@ -10,8 +10,8 @@ import {
 } from '../../lib/store';
 import {
   BrutalBox, MetricBlock, BrutalBar, SectionLabel,
-  Mono, TagPill, Divider, StreakCalendar,
-  FocusTaskCard, BurndownChart, LevelBadge, MilestoneBanner, EmptyState,
+  TagPill, StreakCalendar,
+  FocusTaskCard, BurndownChart, MilestoneBanner,
 } from '../../components/ui';
 import { C, S, FONT } from '../../constants/theme';
 
@@ -32,9 +32,7 @@ export default function OverviewScreen() {
 
   useEffect(() => {
     AsyncStorage.getItem(DISMISSED_MILESTONES_KEY).then((raw) => {
-      if (raw) {
-        try { setDismissedMilestones(JSON.parse(raw)); } catch {}
-      }
+      if (raw) { try { setDismissedMilestones(JSON.parse(raw)); } catch {} }
     });
   }, []);
 
@@ -53,7 +51,7 @@ export default function OverviewScreen() {
   const bestStreak = calcBestStreak(logs);
   const loggedDates = new Set(logs.map((l) => l.date));
   const todayDone = logs.some((l) => l.date === todayKey());
-  const recentLogs = [...logs].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 4);
+  const recentLogs = [...logs].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 3);
 
   const focusTasks = getFocusTasks(tasks);
   const burndownPoints = getBurndownData(tasks, weeks);
@@ -65,6 +63,13 @@ export default function OverviewScreen() {
     (m) => m === streak && !dismissedMilestones.includes(m)
   );
 
+  const relevantRedFlag = RED_FLAGS.find((rf) => {
+    const w = weeks.find((x) => x.num === rf.week);
+    if (!w) return false;
+    const today = todayKey();
+    return (!w.start_date || w.start_date <= today) && (!w.due_date || w.due_date >= today);
+  });
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }} edges={['bottom']}>
       <ScrollView
@@ -72,99 +77,33 @@ export default function OverviewScreen() {
         contentContainerStyle={{ padding: S.md, paddingBottom: 100 }}
         showsVerticalScrollIndicator={false}>
 
-        {/* Milestone celebration — only ever a positive event, never a penalty */}
+        {/* Compact mission strip — static content, deliberately low visual
+            weight so it doesn't compete with actionable data below */}
+        <View style={{
+          flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+          paddingVertical: S.sm, marginBottom: S.md,
+          borderBottomWidth: 1, borderBottomColor: C.border,
+        }}>
+          <View>
+            <Text style={{ fontFamily: FONT.mono, fontSize: 9, color: C.textDim, letterSpacing: 2 }}>
+              AUIV SIMULATOR
+            </Text>
+            <Text style={{ fontFamily: FONT.mono, fontSize: 10, color: C.textSecondary, marginTop: 1 }}>
+              {done}/{total} tasks · {overallPct}% complete
+            </Text>
+          </View>
+          <Text style={{ fontFamily: FONT.mono, fontSize: 22, fontWeight: '900', color: overallPct === 100 ? C.green : C.orange }}>
+            {overallPct}%
+          </Text>
+        </View>
+
+        {/* Milestone celebration — positive event only */}
         {reachedMilestone && (
           <MilestoneBanner streak={reachedMilestone} onDismiss={() => dismissMilestone(reachedMilestone)} />
         )}
 
-        {/* Focus Today — the single most important addition: tells you what
-            to actually do right now, not just where things stand */}
-        <BrutalBox style={{ padding: S.md, borderColor: C.orange }}>
-          <SectionLabel color={C.orange}>◉ FOCUS TODAY</SectionLabel>
-          {focusTasks.length === 0 ? (
-            <View style={{ paddingVertical: S.md, alignItems: 'center' }}>
-              <Text style={{ fontFamily: FONT.mono, fontSize: 11, color: C.textDim, textAlign: 'center', lineHeight: 18 }}>
-                {total === 0 ? 'No tasks yet — add some in Sprint.' : 'Nothing urgent. Pick anything in Sprint to keep moving.'}
-              </Text>
-            </View>
-          ) : (
-            focusTasks.map((t) => (
-              <FocusTaskCard
-                key={t.id}
-                task={t}
-                onPress={() => router.push(`/task/${t.id}`)}
-              />
-            ))
-          )}
-        </BrutalBox>
-
-        {/* Level / XP — reward-only progression */}
-        <View style={{ marginBottom: S.sm }}>
-          <LevelBadge levelInfo={levelInfo} />
-        </View>
-
-        {/* Mission Banner */}
-        <View style={{
-          borderWidth: C.BORDER_W, borderColor: C.orange,
-          backgroundColor: C.surface, padding: S.md, marginBottom: S.sm,
-        }}>
-          <Text style={{ fontFamily: FONT.mono, fontSize: 9, color: C.orange, letterSpacing: 3, textTransform: 'uppercase', marginBottom: 4 }}>
-            ACTIVE MISSION
-          </Text>
-          <Text style={{ fontFamily: FONT.mono, fontSize: 16, fontWeight: '900', color: C.white, marginBottom: 4 }}>
-            AUIV SIMULATOR
-          </Text>
-          <Text style={{ fontFamily: FONT.mono, fontSize: 11, color: C.textSecondary }}>
-            20 m transect · EKF RMS ≤ 0.5 m · pytest exits 0
-          </Text>
-          <View style={{ marginTop: S.md }}>
-            <BrutalBar pct={overallPct} color={overallPct === 100 ? C.green : C.orange} height={6} />
-            <Text style={{ fontFamily: FONT.mono, fontSize: 10, color: C.textDim, marginTop: 4 }}>
-              {done}/{total} TASKS — {overallPct}%
-            </Text>
-          </View>
-        </View>
-
-        {/* Streak card with calendar */}
-        <View style={{
-          borderWidth: C.BORDER_W, borderColor: streak >= 3 ? C.amber : C.border,
-          backgroundColor: C.surface, padding: S.md, marginBottom: S.sm,
-        }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: S.md }}>
-            <View>
-              <Text style={{ fontFamily: FONT.mono, fontSize: 9, color: C.textDim, letterSpacing: 2, textTransform: 'uppercase', marginBottom: 2 }}>
-                CURRENT STREAK
-              </Text>
-              <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6 }}>
-                <Text style={{ fontFamily: FONT.mono, fontSize: 40, fontWeight: '900', color: streak >= 3 ? C.amber : C.orange, lineHeight: 42 }}>
-                  {streak}
-                </Text>
-                <Text style={{ fontFamily: FONT.mono, fontSize: 13, color: C.textDim }}>
-                  {streak === 1 ? 'DAY' : 'DAYS'}
-                </Text>
-              </View>
-            </View>
-            <View style={{ alignItems: 'flex-end' }}>
-              <Text style={{ fontFamily: FONT.mono, fontSize: 9, color: C.textDim, letterSpacing: 2, textTransform: 'uppercase', marginBottom: 2 }}>
-                BEST
-              </Text>
-              <Text style={{ fontFamily: FONT.mono, fontSize: 20, fontWeight: '700', color: C.textSecondary }}>
-                {bestStreak}
-              </Text>
-            </View>
-          </View>
-
-          <StreakCalendar loggedDates={loggedDates} />
-        </View>
-
-        {/* Task metrics row */}
-        <View style={{ flexDirection: 'row', gap: 0, marginBottom: S.sm }}>
-          <MetricBlock value={done}   label="DONE"   color={C.green} />
-          <MetricBlock value={inProg} label="ACTIVE" color={C.orange} />
-          <MetricBlock value={blocked} label="BLOCKED" color={blocked > 0 ? C.red : C.textDim} />
-        </View>
-
-        {/* Today's standup nudge */}
+        {/* Today's standup nudge — only when actionable, elevated to top
+            since it's the single highest-priority alert when present */}
         {!todayDone && (
           <TouchableOpacity
             onPress={() => router.push('/(tabs)/daily')}
@@ -186,7 +125,66 @@ export default function OverviewScreen() {
           </TouchableOpacity>
         )}
 
-        {/* Sprint Burndown — the defining feature of every serious sprint tool */}
+        {/* Focus Today — the hero element, strongest visual treatment */}
+        <BrutalBox style={{ padding: S.md, borderColor: C.orange, marginBottom: S.md }}>
+          <SectionLabel color={C.orange}>◉ FOCUS TODAY</SectionLabel>
+          {focusTasks.length === 0 ? (
+            <View style={{ paddingVertical: S.lg, alignItems: 'center' }}>
+              <Text style={{ fontFamily: FONT.mono, fontSize: 11, color: C.textDim, textAlign: 'center', lineHeight: 18 }}>
+                {total === 0 ? 'No tasks yet — add some in Sprint.' : 'Nothing urgent. Pick anything in Sprint to keep moving.'}
+              </Text>
+            </View>
+          ) : (
+            focusTasks.map((t) => (
+              <FocusTaskCard key={t.id} task={t} onPress={() => router.push(`/task/${t.id}`)} />
+            ))
+          )}
+        </BrutalBox>
+
+        {/* Streak + Level paired row — both are "your growth" metrics,
+            visually grouped instead of stacked as separate full-width cards */}
+        <View style={{ flexDirection: 'row', gap: S.sm, marginBottom: S.sm }}>
+          <View style={{
+            flex: 1, borderWidth: C.BORDER_W, borderColor: streak >= 3 ? C.amber : C.border,
+            backgroundColor: C.surface, padding: S.md,
+          }}>
+            <Text style={{ fontFamily: FONT.mono, fontSize: 8, color: C.textDim, letterSpacing: 1.5 }}>STREAK</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4, marginTop: 2 }}>
+              <Text style={{ fontFamily: FONT.mono, fontSize: 28, fontWeight: '900', color: streak >= 3 ? C.amber : C.orange }}>
+                {streak}
+              </Text>
+              <Text style={{ fontFamily: FONT.mono, fontSize: 9, color: C.textDim }}>/ best {bestStreak}</Text>
+            </View>
+          </View>
+          <View style={{
+            flex: 1, borderWidth: C.BORDER_W, borderColor: C.purple,
+            backgroundColor: C.purpleGhost, padding: S.md,
+          }}>
+            <Text style={{ fontFamily: FONT.mono, fontSize: 8, color: C.purple, letterSpacing: 1.5 }}>
+              LV.{levelInfo.level} {levelInfo.title}
+            </Text>
+            <Text style={{ fontFamily: FONT.mono, fontSize: 18, fontWeight: '900', color: C.textPrimary, marginTop: 2 }}>
+              {xp} XP
+            </Text>
+            <View style={{ marginTop: 6 }}>
+              <BrutalBar pct={levelInfo.progressPct} color={C.purple} height={3} />
+            </View>
+          </View>
+        </View>
+
+        {/* Streak calendar — kept separate since it's a detail view, not a metric */}
+        <BrutalBox style={{ padding: S.md }}>
+          <StreakCalendar loggedDates={loggedDates} />
+        </BrutalBox>
+
+        {/* Task metrics row */}
+        <View style={{ flexDirection: 'row', gap: 0, marginBottom: S.sm }}>
+          <MetricBlock value={done}    label="DONE"    color={C.green} />
+          <MetricBlock value={inProg}  label="ACTIVE"  color={C.orange} />
+          <MetricBlock value={blocked} label="BLOCKED" color={blocked > 0 ? C.red : C.textDim} />
+        </View>
+
+        {/* Sprint Burndown */}
         {burndownPoints.length > 0 && (
           <BrutalBox style={{ padding: S.md }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: S.md }}>
@@ -201,31 +199,7 @@ export default function OverviewScreen() {
           </BrutalBox>
         )}
 
-        {/* Sprint progress */}
-        <BrutalBox style={{ padding: S.md }}>
-          <SectionLabel>SPRINT PROGRESS</SectionLabel>
-          {weeks.map((w) => {
-            const p = getWeekProgress(tasks, w.num);
-            return (
-              <TouchableOpacity
-                key={w.id}
-                onPress={() => { setActiveWeek(w.num); router.push('/(tabs)/sprint'); }}
-                style={{ marginBottom: S.md }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                  <Text style={{ fontFamily: FONT.mono, fontSize: 12, color: C.white, fontWeight: '700' }}>
-                    W{w.num} · {w.title}
-                  </Text>
-                  <Text style={{ fontFamily: FONT.mono, fontSize: 11, color: p.pct === 100 ? C.green : C.textDim }}>
-                    {p.done}/{p.total}
-                  </Text>
-                </View>
-                <BrutalBar pct={p.pct} color={p.pct === 100 ? C.green : p.pct > 0 ? C.orange : C.border} height={3} />
-              </TouchableOpacity>
-            );
-          })}
-        </BrutalBox>
-
-        {/* Recent sessions */}
+        {/* Recent sessions — trimmed to 3, this is a glance not a log */}
         {recentLogs.length > 0 && (
           <BrutalBox style={{ padding: S.md }}>
             <SectionLabel>RECENT SESSIONS</SectionLabel>
@@ -234,12 +208,12 @@ export default function OverviewScreen() {
               const ev = log.ai_eval;
               return (
                 <View key={log.id} style={{
-                  paddingBottom: S.md, marginBottom: S.md,
+                  paddingBottom: S.sm, marginBottom: S.sm,
                   borderBottomWidth: i < recentLogs.length - 1 ? 1 : 0,
                   borderBottomColor: C.border,
                 }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                    <Text style={{ fontFamily: FONT.mono, fontSize: 12, color: C.white, fontWeight: '700' }}>
+                    <Text style={{ fontFamily: FONT.mono, fontSize: 11, color: C.white, fontWeight: '700' }}>
                       {log.date}
                     </Text>
                     {ev && (
@@ -251,13 +225,8 @@ export default function OverviewScreen() {
                     )}
                   </View>
                   {task && (
-                    <Text style={{ fontFamily: FONT.mono, fontSize: 11, color: C.textSecondary }}>
+                    <Text style={{ fontFamily: FONT.mono, fontSize: 10, color: C.textSecondary }}>
                       {task.task_id} · {task.title}
-                    </Text>
-                  )}
-                  {ev?.top_concern && (
-                    <Text style={{ fontFamily: FONT.mono, fontSize: 11, color: C.amber, marginTop: 4 }}>
-                      ▲ {ev.top_concern}
                     </Text>
                   )}
                 </View>
@@ -266,22 +235,16 @@ export default function OverviewScreen() {
           </BrutalBox>
         )}
 
-        {/* Red flags */}
-        <BrutalBox style={{ padding: S.md, borderColor: `${C.red}66` }}>
-          <SectionLabel color={C.red}>⚠ SCOPE-CUT TRIGGERS</SectionLabel>
-          {RED_FLAGS.map((rf, i) => (
-            <View key={i} style={{
-              paddingBottom: S.sm, marginBottom: S.sm,
-              borderBottomWidth: i < RED_FLAGS.length - 1 ? 1 : 0,
-              borderBottomColor: C.border,
-            }}>
-              <TagPill label={`END W${rf.week}`} color={C.amber} bg={C.amberGhost} />
-              <Text style={{ fontFamily: FONT.mono, fontSize: 11, color: C.textSecondary, marginTop: 6, lineHeight: 18 }}>
-                {rf.text}
-              </Text>
-            </View>
-          ))}
-        </BrutalBox>
+        {/* Red flag — only the one relevant to the CURRENT week, not all 4
+            (showing all 4 always was noise; only the live one is signal) */}
+        {relevantRedFlag && (
+          <BrutalBox style={{ padding: S.md, borderColor: C.red }}>
+            <SectionLabel color={C.red}>⚠ THIS WEEK'S RISK</SectionLabel>
+            <Text style={{ fontFamily: FONT.mono, fontSize: 11, color: C.textSecondary, lineHeight: 18 }}>
+              {relevantRedFlag.text}
+            </Text>
+          </BrutalBox>
+        )}
 
       </ScrollView>
     </SafeAreaView>
