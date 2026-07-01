@@ -1,0 +1,153 @@
+name: Watch EAS Build & Publish Release
+
+# Polls the build kicked off by build-android.yml (tracked in
+# .deploy/eas_build.json) on a schedule, without ever blocking a job for the
+# 10-40+ min an EAS build actually takes. Three outcomes:
+#   - finished  -> GitHub Release with the direct .apk download link
+#   - errored/canceled -> GitHub Release noting the failure + build page link
+#   - still pending after 24h -> GitHub Release with the build page link, so
+#     the link can be grabbed manually once it eventually finishes
+# Once any of those fires, the build is marked resolved and left alone —
+# push to frontend/ again (or run build-android.yml manually) to start a new one.
+
+on:
+  schedule:
+    - cron: "*/20 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: eas-build-watch
+  cancel-in-progress: false
+
+jobs:
+  check-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Check tracked build status and decide action
+        id: check
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          STATE_FILE=".deploy/eas_build.json"
+
+          if [ ! -f "$STATE_FILE" ]; then
+            echo "No tracked build — nothing to do."
+            echo "action=none" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          RESOLVED=$(python3 -c "import json; print(json.load(open('$STATE_FILE')).get('resolved', False))")
+          if [ "$RESOLVED" = "True" ]; then
+            echo "Tracked build already resolved — nothing to do."
+            echo "action=none" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          BUILD_ID=$(python3 -c "import json; print(json.load(open('$STATE_FILE'))['build_id'])")
+          STARTED_AT=$(python3 -c "import json; print(json.load(open('$STATE_FILE'))['started_at'])")
+          BUILD_PAGE_URL=$(python3 -c "import json; print(json.load(open('$STATE_FILE'))['build_page_url'])")
+          COMMIT_SHA=$(python3 -c "import json; print(json.load(open('$STATE_FILE'))['commit_sha'])")
+
+          STATUS_JSON=$(cd frontend && npx eas-cli build:view "$BUILD_ID" --json --non-interactive)
+          STATUS=$(echo "$STATUS_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))")
+          ARTIFACT_URL=$(echo "$STATUS_JSON" | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          print((d.get('artifacts') or {}).get('buildUrl') or '')
+          ")
+
+          NOW_EPOCH=$(date -u +%s)
+          STARTED_EPOCH=$(date -u -d "$STARTED_AT" +%s)
+          ELAPSED=$((NOW_EPOCH - STARTED_EPOCH))
+
+          echo "Build $BUILD_ID status=$STATUS elapsed=${ELAPSED}s"
+
+          ACTION="wait"
+          if [ "$STATUS" = "finished" ] && [ -n "$ARTIFACT_URL" ]; then
+            ACTION="release_success"
+          elif [ "$STATUS" = "errored" ] || [ "$STATUS" = "canceled" ] || [ "$STATUS" = "cancelled" ]; then
+            ACTION="release_failed"
+          elif [ "$ELAPSED" -ge 86400 ]; then
+            ACTION="release_timeout"
+          fi
+
+          echo "action=$ACTION"                     >> "$GITHUB_OUTPUT"
+          echo "build_id=$BUILD_ID"                  >> "$GITHUB_OUTPUT"
+          echo "status=$STATUS"                      >> "$GITHUB_OUTPUT"
+          echo "artifact_url=$ARTIFACT_URL"           >> "$GITHUB_OUTPUT"
+          echo "build_page_url=$BUILD_PAGE_URL"       >> "$GITHUB_OUTPUT"
+          echo "commit_sha=$COMMIT_SHA"               >> "$GITHUB_OUTPUT"
+
+      - name: Create Release — build succeeded
+        if: steps.check.outputs.action == 'release_success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="android-preview-$(date -u +%Y%m%d-%H%M%S)"
+          SHORT_SHA="${{ steps.check.outputs.commit_sha }}"
+          gh release create "$TAG" \
+            --repo "${{ github.repository }}" \
+            --title "Android Preview — $(date -u +%Y-%m-%d)" \
+            --notes "### 📱 Download
+
+          [Download APK](${{ steps.check.outputs.artifact_url }})
+
+          Built from \`${SHORT_SHA:0:7}\`. Install on your phone (enable \"install from unknown sources\" if prompted)."
+
+      - name: Create Release — build failed
+        if: steps.check.outputs.action == 'release_failed'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="android-preview-$(date -u +%Y%m%d-%H%M%S)"
+          gh release create "$TAG" \
+            --repo "${{ github.repository }}" \
+            --title "Android Preview — build failed" \
+            --notes "The EAS build did not complete (status: \`${{ steps.check.outputs.status }}\`).
+
+          Check details: ${{ steps.check.outputs.build_page_url }}"
+
+      - name: Create Release — still processing after 24h
+        if: steps.check.outputs.action == 'release_timeout'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="android-preview-$(date -u +%Y%m%d-%H%M%S)"
+          gh release create "$TAG" \
+            --repo "${{ github.repository }}" \
+            --title "Android Preview — still processing" \
+            --notes "The build hasn't finished after 24+ hours (status: \`${{ steps.check.outputs.status }}\`).
+
+          Grab the download link manually once it's done: ${{ steps.check.outputs.build_page_url }}"
+
+      - name: Mark build as resolved
+        if: steps.check.outputs.action == 'release_success' || steps.check.outputs.action == 'release_failed' || steps.check.outputs.action == 'release_timeout'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config --global user.email "actions@github.com"
+          git config --global user.name "github-actions"
+
+          python3 -c "
+          import json
+          d = json.load(open('.deploy/eas_build.json'))
+          d['resolved'] = True
+          d['final_status'] = '${{ steps.check.outputs.status }}'
+          json.dump(d, open('.deploy/eas_build.json', 'w'), indent=2)
+          "
+
+          git add .deploy/eas_build.json
+          git commit -m "deploy: mark EAS build ${{ steps.check.outputs.build_id }} resolved [skip ci]"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" HEAD:main || \
+            echo "Push failed — will re-check and may re-post next run since state wasn't saved."

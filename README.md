@@ -140,6 +140,16 @@ Key components in `frontend/components/ui.tsx`:
 
 ## Installing on Your Phone (Standalone)
 
+**Automatic (Android):** every push to `main` that touches `frontend/` kicks off
+an EAS preview build via `.github/workflows/build-android.yml`. Once it
+finishes, `.github/workflows/eas-build-watch.yml` publishes a GitHub Release
+with the `.apk` download link — check the repo's **Releases** page. If the
+build hasn't finished within 24h, a Release with the manual build-page link
+is posted instead. One-time setup (see the workflow file's header comment):
+link the Expo project with `npx eas-cli init` and add an `EXPO_TOKEN` repo
+secret.
+
+**Manual:**
 ```bash
 # Install EAS CLI
 npm install -g eas-cli

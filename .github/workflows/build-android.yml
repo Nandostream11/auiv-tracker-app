@@ -1,0 +1,142 @@
+name: Build Android Preview APK
+
+# Kicks off an EAS build and returns immediately (does NOT wait for it to
+# finish here — EAS builds routinely take 10-40+ min, and blocking a GitHub
+# Actions job that long burns CI minutes for no reason). A separate workflow
+# (eas-build-watch.yml) polls on a schedule and creates the GitHub Release
+# once the build is done — or, if it's been pending 24h+, posts the manual
+# build-page link instead.
+#
+# One-time manual setup required before this workflow can run (cannot be
+# done from CI — needs an interactive Expo login):
+#   1. cd frontend && npx eas-cli login          (or use an existing account)
+#   2. npx eas-cli init                            (links this repo to an Expo
+#      project, writes `expo.extra.eas.projectId` into app.json — commit that)
+#   3. Add repo secret EXPO_TOKEN — an Expo access token
+#      (expo.dev/accounts/[account]/settings/access-tokens), used for
+#      non-interactive auth in CI.
+# The "Verify EAS project is configured" step below fails fast with this
+# same checklist if projectId is missing, instead of failing deep inside eas-cli.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/build-android.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: eas-build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  start-build:
+    runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Verify EAS project is configured
+        run: |
+          HAS_PROJECT_ID=$(python3 -c "
+          import json
+          d = json.load(open('app.json'))
+          print('yes' if d.get('expo', {}).get('extra', {}).get('eas', {}).get('projectId') else 'no')
+          ")
+          if [ "$HAS_PROJECT_ID" != "yes" ]; then
+            echo "## EAS project not linked yet" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "\`app.json\` has no \`expo.extra.eas.projectId\`. This is a one-time" >> $GITHUB_STEP_SUMMARY
+            echo "manual step that can't run from CI (needs an interactive Expo login):" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo '```bash' >> $GITHUB_STEP_SUMMARY
+            echo "cd frontend" >> $GITHUB_STEP_SUMMARY
+            echo "npx eas-cli login      # or: npx eas-cli whoami to check you're already in" >> $GITHUB_STEP_SUMMARY
+            echo "npx eas-cli init       # links this repo, writes projectId into app.json" >> $GITHUB_STEP_SUMMARY
+            echo "git add app.json && git commit -m 'chore: link EAS project' && git push" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Also make sure the \`EXPO_TOKEN\` repo secret is set (Settings →" >> $GITHUB_STEP_SUMMARY
+            echo "Secrets and variables → Actions) from an Expo access token:" >> $GITHUB_STEP_SUMMARY
+            echo "expo.dev/accounts/[account]/settings/access-tokens." >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+          echo "EAS project is linked."
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Start EAS build (does not wait)
+        id: start
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "EXPO_TOKEN secret is not set — cannot authenticate to Expo. See job summary for setup steps." >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+          BUILD_JSON=$(npx eas-cli build --platform android --profile preview \
+            --non-interactive --no-wait --json)
+
+          BUILD_ID=$(echo "$BUILD_JSON" | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          d = d[0] if isinstance(d, list) else d
+          print(d['id'])
+          ")
+
+          ACCOUNT=$(npx eas-cli whoami --non-interactive 2>/dev/null | tail -n1 | tr -d '[:space:]')
+          SLUG=$(python3 -c "import json; print(json.load(open('app.json'))['expo']['slug'])")
+          BUILD_PAGE_URL="https://expo.dev/accounts/${ACCOUNT}/projects/${SLUG}/builds/${BUILD_ID}"
+
+          echo "build_id=$BUILD_ID"             >> "$GITHUB_OUTPUT"
+          echo "build_page_url=$BUILD_PAGE_URL" >> "$GITHUB_OUTPUT"
+
+          echo "## EAS Android build started" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Build ID: \`$BUILD_ID\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Track it: $BUILD_PAGE_URL" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "A GitHub Release with the .apk download link will be created" >> $GITHUB_STEP_SUMMARY
+          echo "automatically once the build finishes (checked every 20 min)." >> $GITHUB_STEP_SUMMARY
+
+      - name: Record build state for the watcher workflow
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config --global user.email "actions@github.com"
+          git config --global user.name "github-actions"
+
+          mkdir -p ../.deploy
+          cat > ../.deploy/eas_build.json << EOF
+          {
+            "build_id": "${{ steps.start.outputs.build_id }}",
+            "build_page_url": "${{ steps.start.outputs.build_page_url }}",
+            "commit_sha": "${{ github.sha }}",
+            "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "resolved": false
+          }
+          EOF
+
+          git add ../.deploy/eas_build.json
+          if git diff --staged --quiet; then
+            echo "No change to build state"
+            exit 0
+          fi
+          git commit -m "deploy: track EAS build ${{ steps.start.outputs.build_id }} [skip ci]"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" HEAD:main || \
+            echo "Push failed — GITHUB_TOKEN may lack write permission. Build ID is still in this job summary above."
