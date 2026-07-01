@@ -53,6 +53,7 @@ async def init_project(body: ProjectInit):
                 "hours":     week["hours"],
                 "start_date": week_start,
                 "due_date":   week_due,
+                "agenda":     "",
                 "is_custom":  False,
                 "created_at": now,
                 "updated_at": now,

@@ -70,6 +70,7 @@ async def create_week(body: WeekCreate):
         "hours":      body.hours or 0,
         "start_date": start_date,
         "due_date":   due_date,
+        "agenda":     body.agenda or "",
         "is_custom":  True,
         "created_at": now,
         "updated_at": now,

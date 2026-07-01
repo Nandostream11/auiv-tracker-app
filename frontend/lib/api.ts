@@ -149,6 +149,14 @@ export async function suggestWeekPlan(body: {
   return request<any>('POST', '/api/ai/suggest-week-plan', body);
 }
 
+export async function suggestWeekTasks(body: {
+  device_id: string; api_key: string; week_num: number; week_title: string;
+  agenda?: string;
+  tasks: { task_id: string; title: string; status: string; due_date?: string | null }[];
+}) {
+  return request<any>('POST', '/api/ai/suggest-week-tasks', body);
+}
+
 // ── Weeks ─────────────────────────────────────────────────────────────────
 export async function getAllWeeks(device_id: string) {
   return request<any[]>('GET', `/api/weeks/${device_id}`);
@@ -156,13 +164,13 @@ export async function getAllWeeks(device_id: string) {
 
 export async function createWeek(body: {
   device_id: string; title: string; hours?: number;
-  start_date?: string; due_date?: string;
+  start_date?: string; due_date?: string; agenda?: string;
 }) {
   return request<any>('POST', '/api/weeks/', body);
 }
 
 export async function updateWeek(weekId: string, fields: {
-  title?: string; hours?: number; start_date?: string; due_date?: string;
+  title?: string; hours?: number; start_date?: string; due_date?: string; agenda?: string;
 }) {
   return request<any>('PATCH', `/api/weeks/${weekId}`, fields);
 }

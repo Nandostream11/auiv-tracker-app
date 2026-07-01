@@ -156,6 +156,25 @@ class WeekPlanResponse(BaseModel):
     summary: str                # one paragraph overview
 
 
+class WeekTaskSuggestRequest(BaseModel):
+    device_id: str
+    api_key: str
+    week_num: int
+    week_title: str
+    agenda: Optional[str] = ""     # the week's description — what this week is actually about
+    tasks: List[TaskSummary]       # tasks already in the week, so the AI doesn't duplicate them
+
+
+class TaskSuggestion(BaseModel):
+    title: str
+    detail: str
+    done_criteria: str
+
+
+class WeekTaskSuggestResponse(BaseModel):
+    tasks: List[TaskSuggestion]
+
+
 # ── AI Job (persistent retry queue) ──────────────────────────────────────
 class AIJobCreate(BaseModel):
     device_id: str
@@ -198,6 +217,7 @@ class WeekCreate(BaseModel):
     hours: Optional[int] = 0
     start_date: Optional[str] = None
     due_date: Optional[str] = None
+    agenda: Optional[str] = None
 
 
 class WeekUpdate(BaseModel):
@@ -205,6 +225,7 @@ class WeekUpdate(BaseModel):
     hours: Optional[int] = None
     start_date: Optional[str] = None
     due_date: Optional[str] = None
+    agenda: Optional[str] = None
 
 
 class WeekResponse(BaseModel):
@@ -215,6 +236,7 @@ class WeekResponse(BaseModel):
     hours: int
     start_date: Optional[str] = None
     due_date: Optional[str] = None
+    agenda: Optional[str] = None
     is_custom: bool
     created_at: str
     updated_at: str

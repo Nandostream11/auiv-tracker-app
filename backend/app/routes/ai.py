@@ -25,7 +25,7 @@ import httpx
 
 from app.db import jobs_col
 from app.models.models import (
-    EvaluateRequest, SubtaskRequest, WeekPlanRequest,
+    EvaluateRequest, SubtaskRequest, WeekPlanRequest, WeekTaskSuggestRequest,
 )
 from app.services.ai_service import attempt_evaluation, AIJobQueued
 
@@ -258,6 +258,53 @@ async def suggest_week_plan(body: WeekPlanRequest):
                 "next_retry_at": job["next_retry_at"] if job else None,
                 "retry_hours":   5,
                 "message":       "AI unavailable. Week plan queued — will retry in 5 hours.",
+            },
+        )
+
+
+# ── Suggest week tasks ────────────────────────────────────────────────────
+
+@router.post("/suggest-week-tasks")
+async def suggest_week_tasks(body: WeekTaskSuggestRequest):
+    """
+    Given a week's agenda (its free-text description) and the tasks already
+    in that week, asks the AI to propose new concrete tasks that would
+    accomplish the agenda without duplicating what's already there. Returns
+    suggestions only — the frontend lets the user pick which ones to
+    actually create via the normal POST /api/tasks/ endpoint.
+    Same immediate-attempt + 5h-retry-queue pattern as the other AI routes.
+    """
+    payload = {
+        "week_num":   body.week_num,
+        "week_title": body.week_title,
+        "agenda":     body.agenda or "",
+        "tasks":      [t.model_dump() for t in body.tasks],
+    }
+
+    try:
+        result = await attempt_evaluation(
+            device_id=body.device_id,
+            log_id="",
+            api_key=body.api_key,
+            payload=payload,
+            job_type="suggest_week_tasks",
+        )
+        return {"status": "completed", "result": result}
+
+    except AIJobQueued as jq:
+        job = await jobs_col().find_one({"_id": ObjectId(jq.job_id)})
+        from app.services.ai_service import detect_provider
+        provider_label = {"gemini": "Gemini", "openrouter": "OpenRouter", "anthropic": "Claude"}.get(
+            detect_provider(body.api_key), "AI provider"
+        )
+        return JSONResponse(
+            status_code=202,
+            content={
+                "status":        "pending",
+                "job_id":        jq.job_id,
+                "next_retry_at": job["next_retry_at"] if job else None,
+                "retry_hours":   5,
+                "message":       f"{provider_label} unavailable ({jq.reason}). Task suggestions queued — will retry in 5 hours.",
             },
         )
 

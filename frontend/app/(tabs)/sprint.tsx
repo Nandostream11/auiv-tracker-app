@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   ScrollView, View, Text, TouchableOpacity,
   Modal, Alert, FlatList,
@@ -9,10 +9,15 @@ import { useStore, getWeekProgress, statusColor, statusLabel, getTimelineUrgency
 import {
   BrutalBox, BrutalBtn, BrutalBar, SectionLabel,
   Mono, TagPill, Divider, BrutalInput, StatusCycleBtn, Spinner,
-  TimelineBadge,
+  TimelineBadge, CheckRow,
 } from '../../components/ui';
 import { C, S, FONT } from '../../constants/theme';
-import { createTask, deleteTask, updateTask, suggestWeekPlan, getApiKey, createWeek, deleteWeek } from '../../lib/api';
+import {
+  createTask, deleteTask, updateTask, suggestWeekPlan, suggestWeekTasks,
+  getApiKey, createWeek, updateWeek, deleteWeek,
+} from '../../lib/api';
+
+interface TaskSuggestion { title: string; detail: string; done_criteria: string; }
 
 interface TaskFormData {
   task_id: string; title: string; detail: string; done_criteria: string;
@@ -30,18 +35,46 @@ export default function SprintScreen() {
   const [weekPlan, setWeekPlan] = useState<any>(null);
   const [planError, setPlanError] = useState('');
 
+  const [agenda, setAgendaState] = useState('');
+  const [agendaSaving, setAgendaSaving] = useState(false);
+  const agendaTimer = useRef<any>(null);
+
+  const [suggestTasksLoading, setSuggestTasksLoading] = useState(false);
+  const [suggestTasksError, setSuggestTasksError] = useState('');
+  const [suggestedTasks, setSuggestedTasks] = useState<TaskSuggestion[] | null>(null);
+  const [selectedSuggestions, setSelectedSuggestions] = useState<boolean[]>([]);
+  const [addingSuggested, setAddingSuggested] = useState(false);
+
   const weekTasks = tasks
     .filter((t) => t.week_num === activeWeek)
     .sort((a, b) => a.task_id.localeCompare(b.task_id));
   const progress = getWeekProgress(tasks, activeWeek);
-  const weekMeta = weeks.find((w) => w.num === activeWeek) || { num: activeWeek, title: 'Untitled Week', hours: 0 };
+  const weekMeta = weeks.find((w) => w.num === activeWeek) || { num: activeWeek, title: 'Untitled Week', hours: 0, agenda: '' };
 
-  // Clear a stale plan when switching weeks so it never looks like it
-  // belongs to the wrong week
+  // Clear a stale plan/suggestions when switching weeks so nothing ever
+  // looks like it belongs to the wrong week
   useEffect(() => {
     setWeekPlan(null);
     setPlanError('');
+    setSuggestedTasks(null);
+    setSuggestTasksError('');
+    setAgendaState(weeks.find((w) => w.num === activeWeek)?.agenda || '');
   }, [activeWeek]);
+
+  function handleAgendaChange(v: string) {
+    setAgendaState(v);
+    clearTimeout(agendaTimer.current);
+    agendaTimer.current = setTimeout(async () => {
+      const week = weeks.find((w) => w.num === activeWeek);
+      if (!week) return;
+      setAgendaSaving(true);
+      try {
+        const updated = await updateWeek(week.id, { agenda: v });
+        upsertWeek(updated);
+      } catch {}
+      setAgendaSaving(false);
+    }, 800);
+  }
 
   async function handleAddWeek() {
     const nextNum = weeks.length > 0 ? Math.max(...weeks.map((w) => w.num)) + 1 : 1;
@@ -120,6 +153,91 @@ export default function SprintScreen() {
       setPlanError(e.message);
     }
     setPlanLoading(false);
+  }
+
+  async function handleSuggestTasks() {
+    const apiKey = await getApiKey();
+    if (!apiKey) {
+      Alert.alert('NO API KEY', 'Add your AI API key in Settings to use AI task suggestions.');
+      return;
+    }
+    if (!agenda.trim()) {
+      Alert.alert('NO AGENDA', "Add this week's agenda above before asking AI for task suggestions.");
+      return;
+    }
+    setSuggestTasksLoading(true);
+    setSuggestTasksError('');
+    setSuggestedTasks(null);
+    try {
+      const res = await suggestWeekTasks({
+        device_id: deviceId,
+        api_key: apiKey,
+        week_num: activeWeek,
+        week_title: weekMeta.title,
+        agenda: agenda.trim(),
+        tasks: weekTasks.map((t) => ({
+          task_id: t.task_id, title: t.title, status: t.status,
+          due_date: t.due_date || null,
+        })),
+      });
+
+      if (res.status === 'pending') {
+        setSuggestTasksError(res.message || 'AI unavailable — queued, will retry in ~5 hours.');
+        return;
+      }
+
+      const suggestions: TaskSuggestion[] = res.result?.tasks || [];
+      if (suggestions.length === 0) {
+        setSuggestTasksError('The AI did not return any task suggestions. Try again.');
+        return;
+      }
+      setSuggestedTasks(suggestions);
+      setSelectedSuggestions(suggestions.map(() => true));
+    } catch (e: any) {
+      setSuggestTasksError(e.message);
+    }
+    setSuggestTasksLoading(false);
+  }
+
+  function toggleSuggestion(i: number) {
+    setSelectedSuggestions((prev) => {
+      const next = [...prev];
+      next[i] = !next[i];
+      return next;
+    });
+  }
+
+  async function handleAddSelectedSuggestions() {
+    if (!suggestedTasks) return;
+    const toAdd = suggestedTasks.filter((_, i) => selectedSuggestions[i]);
+    if (toAdd.length === 0) {
+      Alert.alert('NOTHING SELECTED', 'Select at least one suggested task to add.');
+      return;
+    }
+    setAddingSuggested(true);
+    try {
+      const existingNums = weekTasks
+        .map((t) => t.task_id.split('.'))
+        .filter((p) => p.length === 2 && p[0] === String(activeWeek))
+        .map((p) => parseInt(p[1], 10))
+        .filter((n) => !isNaN(n));
+      let counter = existingNums.length > 0 ? Math.max(...existingNums) + 1 : 1;
+
+      for (const s of toAdd) {
+        const task = await createTask({
+          device_id: deviceId, week_num: activeWeek,
+          task_id: `${activeWeek}.${counter}`,
+          title: s.title, detail: s.detail, done_criteria: s.done_criteria,
+        });
+        upsertTask(task);
+        counter++;
+      }
+      setSuggestedTasks(null);
+      Alert.alert('TASKS ADDED', `${toAdd.length} task(s) added to Week ${activeWeek}.`);
+    } catch (e: any) {
+      Alert.alert('ERROR', e.message);
+    }
+    setAddingSuggested(false);
   }
 
   async function handleAddTask() {
@@ -268,6 +386,92 @@ export default function SprintScreen() {
             </Text>
           </TouchableOpacity>
         </View>
+
+        {/* Week Agenda — free-text description of what this week is about,
+            used as the grounding context for AI task suggestions below */}
+        <BrutalBox style={{ padding: S.md }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: S.sm }}>
+            <SectionLabel color={C.orange}>WEEK AGENDA</SectionLabel>
+            <Text style={{ fontFamily: FONT.mono, fontSize: 9, color: agendaSaving ? C.orange : C.textDim }}>
+              {agendaSaving ? 'SAVING...' : 'AUTO-SAVED'}
+            </Text>
+          </View>
+          <BrutalInput
+            value={agenda}
+            onChangeText={handleAgendaChange}
+            placeholder="What's this week actually about? e.g. Get the EKF publishing at 50Hz and validate against the DVL ground truth."
+            multiline
+            rows={3}
+          />
+          <View style={{ marginTop: S.sm }}>
+            <TouchableOpacity
+              onPress={handleSuggestTasks}
+              disabled={suggestTasksLoading}
+              style={{
+                borderWidth: C.BORDER_W, borderColor: C.purple,
+                backgroundColor: C.purpleGhost,
+                paddingVertical: S.sm, alignItems: 'center', justifyContent: 'center',
+                flexDirection: 'row', gap: S.sm, minHeight: S.tapMin,
+                opacity: suggestTasksLoading ? 0.5 : 1,
+              }}>
+              <Text style={{ fontFamily: FONT.mono, fontSize: 12, fontWeight: '900', color: C.purple, letterSpacing: 1 }}>
+                {suggestTasksLoading ? '◈ THINKING...' : '◈ SUGGEST TASKS FROM AGENDA'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </BrutalBox>
+
+        {/* Suggested tasks — error/pending state */}
+        {suggestTasksError !== '' && (
+          <View style={{
+            borderWidth: C.BORDER_W, borderColor: C.amber, backgroundColor: C.amberGhost,
+            padding: S.md, marginBottom: S.sm,
+          }}>
+            <Text style={{ fontFamily: FONT.mono, fontSize: 11, color: C.amber, lineHeight: 17 }}>
+              {suggestTasksError}
+            </Text>
+          </View>
+        )}
+
+        {/* Suggested tasks — review + selective add */}
+        {suggestedTasks && (
+          <View style={{
+            borderWidth: C.BORDER_W, borderColor: C.purple,
+            backgroundColor: C.surface, marginBottom: S.sm,
+          }}>
+            <View style={{
+              padding: S.md, borderBottomWidth: 1, borderBottomColor: C.border,
+              flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+            }}>
+              <Text style={{ fontFamily: FONT.mono, fontSize: 10, color: C.purple, letterSpacing: 2 }}>
+                ◈ SUGGESTED TASKS
+              </Text>
+              <TouchableOpacity onPress={() => setSuggestedTasks(null)} style={{ padding: S.sm, minHeight: 44, justifyContent: 'center' }}>
+                <Text style={{ color: C.textDim, fontSize: 16 }}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ paddingHorizontal: S.md }}>
+              {suggestedTasks.map((s, i) => (
+                <CheckRow
+                  key={i}
+                  label={`${s.title} — ${s.done_criteria}`}
+                  checked={selectedSuggestions[i]}
+                  onToggle={() => toggleSuggestion(i)}
+                />
+              ))}
+            </View>
+
+            <View style={{ padding: S.md }}>
+              <BrutalBtn
+                label={addingSuggested ? 'ADDING...' : `ADD SELECTED (${selectedSuggestions.filter(Boolean).length})`}
+                onPress={handleAddSelectedSuggestions}
+                disabled={addingSuggested || selectedSuggestions.every((s) => !s)}
+                color={C.purple}
+              />
+            </View>
+          </View>
+        )}
 
         {/* Week plan error/pending state */}
         {planError !== '' && (

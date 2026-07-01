@@ -47,6 +47,7 @@ export interface Week {
   hours: number;
   start_date?: string | null;
   due_date?: string | null;
+  agenda?: string | null;   // free-text description of what this week is about
   is_custom: boolean;
   created_at: string;
   updated_at: string;

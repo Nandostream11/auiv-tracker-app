@@ -184,12 +184,51 @@ Respond ONLY with valid JSON, no markdown, no backticks:
 {{"focus_today":["<task_id: short reason>","..."],"at_risk":["<task_id: why>","..."],"sequencing_note":"<one sentence>","week_outlook":"on_track"|"tight"|"at_risk","summary":"<one paragraph>"}}"""
 
 
+def _build_week_task_suggestion_prompt(payload: Dict[str, Any]) -> str:
+    tasks = payload.get("tasks", [])
+    existing_lines = "\n".join(
+        f"- [{t['task_id']}] {t['title']} — status: {t['status']}" for t in tasks
+    ) or "(none yet)"
+
+    agenda = (payload.get("agenda") or "").strip() or "(no agenda provided)"
+
+    return f"""You are a senior robotics engineering lead breaking a week's agenda down into concrete sprint tasks for the AUIV Simulator project.
+
+WEEK {payload['week_num']}: {payload['week_title']}
+
+THIS WEEK'S AGENDA:
+{agenda}
+
+TASKS ALREADY IN THIS WEEK (do not propose duplicates of these):
+{existing_lines}
+
+Propose 3-6 NEW concrete tasks that would accomplish this week's agenda and
+aren't already covered by the existing tasks above. Each task should be
+scoped to roughly a single work session (a few hours), not an entire week.
+
+Respond ONLY with valid JSON, no markdown, no backticks:
+{{"tasks":[{{"title":"<short imperative title>","detail":"<1-2 sentence description of the work>","done_criteria":"<concrete, verifiable definition of done>"}}]}}"""
+
+
 def _build_prompt(job_type: str, payload: Dict[str, Any]) -> str:
     if job_type == "evaluate":
         return _build_evaluate_prompt(payload)
     if job_type == "week_plan":
         return _build_week_plan_prompt(payload)
+    if job_type == "suggest_week_tasks":
+        return _build_week_task_suggestion_prompt(payload)
     return _build_subtask_prompt(payload)
+
+
+# Per-job-type output budget — each prompt's expected response shape needs a
+# different amount of room (a single subtask list vs. several full task
+# descriptions), so this is a lookup rather than one shared constant.
+JOB_MAX_TOKENS = {
+    "evaluate":            800,
+    "week_plan":           1000,
+    "suggest_week_tasks":  1200,
+}
+DEFAULT_MAX_TOKENS = 600  # suggest_subtasks and any other job type
 
 
 # ── Raw Claude call ───────────────────────────────────────────────────────
@@ -440,7 +479,7 @@ async def attempt_evaluation(
         }
 
     prompt = _build_prompt(job_type, payload)
-    max_tokens = 800 if job_type == "evaluate" else (1000 if job_type == "week_plan" else 600)
+    max_tokens = JOB_MAX_TOKENS.get(job_type, DEFAULT_MAX_TOKENS)
     provider = detect_provider(api_key)
 
     try:
@@ -500,7 +539,7 @@ async def run_pending_retries():
         )
 
         prompt     = _build_prompt(job_type, payload)
-        max_tokens = 800 if job_type == "evaluate" else (1000 if job_type == "week_plan" else 600)
+        max_tokens = JOB_MAX_TOKENS.get(job_type, DEFAULT_MAX_TOKENS)
 
         try:
             result = await _call_llm(api_key, prompt, max_tokens)
