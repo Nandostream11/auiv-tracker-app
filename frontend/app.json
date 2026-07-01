@@ -38,6 +38,15 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "b2d8d490-f597-4e1f-b165-cb6849e3038f"
+      }
+    },
+    "owner": "anandvk"
   }
 }
