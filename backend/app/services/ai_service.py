@@ -287,6 +287,14 @@ async def _call_openrouter(api_key: str, prompt: str, max_tokens: int = 800) -> 
         "model": OPENROUTER_MODEL,
         "max_tokens": max_tokens,
         "messages": [{"role": "user", "content": prompt}],
+        # The free router's pool includes reasoning/chain-of-thought models
+        # (e.g. nvidia/nemotron-*-reasoning). Left uncapped, those models can
+        # spend the ENTIRE max_tokens budget on internal reasoning and hit
+        # finish_reason=length before writing any of the actual answer,
+        # leaving message.content = "" (json.loads then fails with the
+        # confusing "Expecting value: line 1 column 1 (char 0)"). Capping the
+        # reasoning budget reserves the rest of max_tokens for real output.
+        "reasoning": {"max_tokens": 200, "exclude": True},
     }
     async with httpx.AsyncClient(timeout=TIMEOUT_S) as client:
         resp = await client.post(OPENROUTER_URL, headers=headers, json=body)
@@ -304,7 +312,17 @@ async def _call_openrouter(api_key: str, prompt: str, max_tokens: int = 800) -> 
     if not choices:
         raise RuntimeError("OpenRouter returned no choices")
 
-    raw = choices[0].get("message", {}).get("content", "")
+    message = choices[0].get("message", {})
+    raw = message.get("content", "") or ""
+    if not raw.strip():
+        finish_reason = choices[0].get("finish_reason", "unknown")
+        model_used = data.get("model", OPENROUTER_MODEL)
+        raise RuntimeError(
+            f"OpenRouter model '{model_used}' returned empty content "
+            f"(finish_reason={finish_reason}) — likely spent its full token "
+            f"budget on internal reasoning before answering"
+        )
+
     clean = raw.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
     return json.loads(clean)
 
