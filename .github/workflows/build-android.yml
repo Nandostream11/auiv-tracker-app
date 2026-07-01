@@ -17,6 +17,12 @@ name: Build Android Preview APK
 #      non-interactive auth in CI.
 # The "Verify EAS project is configured" step below fails fast with this
 # same checklist if projectId is missing, instead of failing deep inside eas-cli.
+#
+# Only one build runs at a time. If a push lands while a previous build is
+# still unresolved (tracked in .deploy/eas_build.json), this run skips
+# starting a new one instead of orphaning the one in progress — the state
+# file only ever tracks a single build, so a second one would silently never
+# get a Release. Push again (or re-run manually) once the current one resolves.
 
 on:
   push:
@@ -44,12 +50,33 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Check for an in-progress build
+        id: guard
+        run: |
+          STATE_FILE="../.deploy/eas_build.json"
+          if [ -f "$STATE_FILE" ]; then
+            RESOLVED=$(python3 -c "import json; print(json.load(open('$STATE_FILE')).get('resolved', False))")
+            if [ "$RESOLVED" != "True" ]; then
+              BUILD_ID=$(python3 -c "import json; print(json.load(open('$STATE_FILE'))['build_id'])")
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "## Skipped — a build is already in progress" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "Build \`$BUILD_ID\` hasn't resolved yet. Only one build runs at a" >> $GITHUB_STEP_SUMMARY
+              echo "time so it doesn't get orphaned — push again (or re-run this" >> $GITHUB_STEP_SUMMARY
+              echo "workflow manually) once it finishes." >> $GITHUB_STEP_SUMMARY
+              exit 0
+            fi
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
       - name: Setup Node 20
+        if: steps.guard.outputs.skip != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
       - name: Verify EAS project is configured
+        if: steps.guard.outputs.skip != 'true'
         run: |
           HAS_PROJECT_ID=$(python3 -c "
           import json
@@ -77,9 +104,11 @@ jobs:
           echo "EAS project is linked."
 
       - name: Install dependencies
+        if: steps.guard.outputs.skip != 'true'
         run: npm ci
 
       - name: Start EAS build (does not wait)
+        if: steps.guard.outputs.skip != 'true'
         id: start
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
@@ -115,6 +144,7 @@ jobs:
           echo "automatically once the build finishes (checked every 20 min)." >> $GITHUB_STEP_SUMMARY
 
       - name: Record build state for the watcher workflow
+        if: steps.guard.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
