@@ -399,7 +399,9 @@ export function DateStepper({
           {label}
         </Text>
         {value && (
-          <TouchableOpacity onPress={() => onChange(null)} style={{ padding: 4 }}>
+          <TouchableOpacity
+            onPress={() => onChange(null)}
+            style={{ minWidth: 44, minHeight: 44, justifyContent: 'center', paddingHorizontal: 4 }}>
             <Text style={{ fontFamily: FONT.mono, fontSize: 9, color: C.textDim }}>✕ CLEAR</Text>
           </TouchableOpacity>
         )}
@@ -721,7 +723,9 @@ export function MilestoneBanner({
           {streak} days of standups logged in a row. Keep it going.
         </Text>
       </View>
-      <TouchableOpacity onPress={onDismiss} style={{ padding: S.sm }}>
+      <TouchableOpacity
+        onPress={onDismiss}
+        style={{ minWidth: S.tapMin, minHeight: S.tapMin, alignItems: 'center', justifyContent: 'center' }}>
         <Text style={{ color: C.textDim, fontSize: 16 }}>✕</Text>
       </TouchableOpacity>
     </View>
